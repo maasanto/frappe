@@ -32,7 +32,7 @@ frappe.router.on("change", () => {
 function is_route_useful(route) {
 	if (!route[1]) {
 		return false;
-	} else if ((route[0] === "List" && !route[2]) || routes_to_skip.includes(route[0])) {
+	} else if (routes_to_skip.includes(route[0])) {
 		return false;
 	} else {
 		return true;
