@@ -19,10 +19,12 @@ const save_routes = frappe.utils.debounce(() => {
 
 frappe.router.on("change", () => {
 	const route = frappe.get_route();
-	if (is_route_useful(route)) {
+	const route_str = frappe.get_route_str();
+	if (is_route_useful(route) && route_str !== frappe._last_route_history) {
+		frappe._last_route_history = route_str;
 		frappe.route_history_queue.push({
 			creation: frappe.datetime.now_datetime(),
-			route: frappe.get_route_str(),
+			route: route_str,
 		});
 
 		save_routes();
