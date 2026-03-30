@@ -13,7 +13,7 @@ const save_routes = frappe.utils.debounce(() => {
 			routes: routes,
 		})
 		.catch(() => {
-			frappe.route_history_queue.concat(routes);
+			frappe.route_history_queue = routes.concat(frappe.route_history_queue);
 		});
 }, 10000);
 
