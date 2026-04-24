@@ -325,20 +325,27 @@ def create_user_icons(user, data):
 
 @frappe.whitelist()
 def add_workspace_to_desktop(workspace: str):
-	sidebar = frappe.new_doc("Workspace Sidebar")
-	sidebar_item = frappe.new_doc("Workspace Sidebar Item")
-	sidebar_item.label = workspace
-	sidebar_item.type = "Link"
-	sidebar_item.link_to = workspace
-	sidebar_item.link_type = "Workspace"
-	sidebar.title = workspace
-	sidebar.append("items", sidebar_item)
-	sidebar.save()
+	if frappe.db.exists("Workspace Sidebar", workspace):
+		sidebar = frappe.get_doc("Workspace Sidebar", workspace)
+	else:
+		sidebar = frappe.new_doc("Workspace Sidebar")
+		sidebar.title = workspace
+		sidebar_item = frappe.new_doc("Workspace Sidebar Item")
+		sidebar_item.label = workspace
+		sidebar_item.type = "Link"
+		sidebar_item.link_to = workspace
+		sidebar_item.link_type = "Workspace"
+		sidebar.append("items", sidebar_item)
+		sidebar.insert()
 
-	new_icon = frappe.new_doc("Desktop Icon")
-	new_icon.label = workspace
-	new_icon.icon_type = "Link"
-	new_icon.link_to = workspace
-	new_icon.link_type = "Workspace Sidebar"
-	new_icon.insert()
-	return {"icon": new_icon.as_dict()}
+	if frappe.db.exists("Desktop Icon", workspace):
+		icon = frappe.get_doc("Desktop Icon", workspace)
+	else:
+		icon = frappe.new_doc("Desktop Icon")
+		icon.label = workspace
+		icon.icon_type = "Link"
+		icon.link_to = workspace
+		icon.link_type = "Workspace Sidebar"
+		icon.insert()
+
+	return {"icon": icon.as_dict()}
