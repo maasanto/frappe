@@ -979,29 +979,27 @@ class DesktopIcon {
 						return icon_data.standard != 1;
 					},
 					onClick: function () {
-						frappe.ui.form.make_quick_entry(
-							"Desktop Icon",
-							function (icon) {
-								let old_index = frappe.new_desktop_icons.findIndex(
-									(d_icon) => d_icon.label == icon.label
-								);
-								if (old_index !== -1) {
-									frappe.new_desktop_icons.splice(old_index, 1);
-								}
-								frappe.new_desktop_icons.push(icon);
-								frappe.new_icons.push(icon.name);
-								frappe.pages["desktop"].desktop_page.update();
-							},
-							function (dialog) {
-								dialog.set_df_property("label", "read_only", 1);
-								dialog.fields.forEach((field) => {
-									field.default = icon_data[field.fieldname];
-								});
-								dialog.script_manager.trigger("refresh");
-							},
-							icon_data,
-							null
-						);
+						frappe.db.get_doc("Desktop Icon", icon_data.name).then((doc) => {
+							frappe.ui.form.make_quick_entry(
+								"Desktop Icon",
+								function (icon) {
+									let old_index = frappe.new_desktop_icons.findIndex(
+										(d_icon) => d_icon.label == icon.label
+									);
+									if (old_index !== -1) {
+										frappe.new_desktop_icons.splice(old_index, 1);
+									}
+									frappe.new_desktop_icons.push(icon);
+									frappe.new_icons.push(icon.name);
+									frappe.pages["desktop"].desktop_page.update();
+								},
+								function (dialog) {
+									dialog.set_df_property("label", "read_only", 1);
+								},
+								doc,
+								null
+							);
+						});
 					},
 				},
 				{
