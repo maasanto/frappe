@@ -302,10 +302,13 @@ frappe.search.AwesomeBar = class AwesomeBar {
 		if (txt.charAt(0) === "#") {
 			options = frappe.tags.utils.get_tags(txt);
 		}
-		var out = this.deduplicate(options);
-		return out.sort(function (a, b) {
+		var out = this.deduplicate(options).sort(function (a, b) {
 			return b.index - a.index;
 		});
+
+		frappe.search.utils.rerank_by_frecency(out);
+
+		return out;
 	}
 
 	deduplicate(options) {

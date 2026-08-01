@@ -1,10 +1,57 @@
 frappe.provide("frappe.search");
 import { fuzzy_match } from "./fuzzy_match.js";
 
+// Results scoring within this fraction of the best match are close enough that
+// personal history, not the fuzzy score, should decide their order.
+const FRECENCY_BAND = 0.85;
+
 frappe.search.utils = {
 	setup_recent: function () {
 		this.recent = JSON.parse(frappe.boot.user.recent || "[]") || [];
+
+		// Summed, not assigned: a doctype's list, kanban and calendar routes all
+		// collapse to one key, and they are the same page as far as ranking goes.
+		this.frecency = {};
+		(frappe.boot.frequently_visited_links || []).forEach((link) => {
+			const key = this.route_key(link.route);
+			this.frecency[key] = (this.frecency[key] || 0) + link.score;
+		});
 	},
+
+	/**
+	 * Route History stores the visited route ("List/Sales Invoice/List") while
+	 * awesome bar options carry the route that opens it (["List", "Sales Invoice"]).
+	 * Collapse both to the same key so a list and its views count as one entry.
+	 */
+	route_key: function (route) {
+		const parts = typeof route === "string" ? route.split("/") : route;
+		const is_list_view = parts[0] === "List" && !["Report", "Inbox"].includes(parts[2]);
+		return (is_list_view ? parts.slice(0, 2) : parts).join("/");
+	},
+
+	/**
+	 * Reorders only the results that are already near-ties on match quality, so a
+	 * frequently visited page can win a close call but never outrank a better match.
+	 *
+	 * Swaps their scores rather than their positions: Awesomplete re-sorts the list
+	 * by `index` before rendering, so anything expressed as array order is discarded.
+	 * Options must arrive sorted by `index` descending.
+	 */
+	rerank_by_frecency: function (options) {
+		if (!options.length) return;
+
+		const cutoff = options[0].index * FRECENCY_BAND;
+		const near_ties = options.filter((option) => option.index >= cutoff);
+		const scores_to_share = near_ties.map((option) => option.index);
+
+		const frecency_of = (option) =>
+			option.route ? this.frecency[this.route_key(option.route)] || 0 : 0;
+
+		near_ties
+			.sort((a, b) => frecency_of(b) - frecency_of(a) || b.index - a.index)
+			.forEach((option, rank) => (option.index = scores_to_share[rank]));
+	},
+
 	results_to_hide: [],
 	get_recent_pages: function (keywords) {
 		if (keywords === null) keywords = "";
@@ -122,13 +169,14 @@ frappe.search.utils = {
 	},
 	get_frequent_links() {
 		let options = [];
-		frappe.boot.frequently_visited_links.forEach((link) => {
+		// Boot carries more links than the navbar lists — the rest only feed the frecency boost.
+		frappe.boot.frequently_visited_links.slice(0, 5).forEach((link) => {
 			const label = frappe.utils.get_route_label(link.route);
 			options.push({
 				route: link.route,
 				label: label,
 				value: label,
-				index: link.count,
+				index: link.score,
 			});
 		});
 		if (!options.length) {
