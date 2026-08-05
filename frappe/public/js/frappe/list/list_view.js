@@ -1,6 +1,21 @@
 import BulkOperations from "./bulk_operations";
 import ListSettings from "./list_settings";
 
+// Reduced subset of the predefined periods, offered on date column headers.
+// Values only — frappe.ui.filter_utils.get_timespan_options() owns the labels.
+const COLUMN_PERIOD_VALUES = [
+	"today",
+	"yesterday",
+	"this week",
+	"last week",
+	"this month",
+	"last month",
+	"this quarter",
+	"last quarter",
+	"this year",
+	"last year",
+];
+
 frappe.provide("frappe.views");
 
 frappe.views.ListView = class ListView extends frappe.views.BaseList {
@@ -841,6 +856,7 @@ frappe.views.ListView = class ListView extends frappe.views.BaseList {
 
 	render_header(refresh_header = false) {
 		if (refresh_header) {
+			this.destroy_period_dropdowns();
 			this.$result.find(".list-row-head").remove();
 		}
 		if (this.$result.find(".list-row-head").length === 0) {
@@ -853,6 +869,8 @@ frappe.views.ListView = class ListView extends frappe.views.BaseList {
 			}
 		}
 		this.setup_column_resize();
+		this.setup_period_dropdowns();
+		this.update_period_filter_buttons();
 	}
 
 	render_skeleton() {
@@ -1267,6 +1285,7 @@ frappe.views.ListView = class ListView extends frappe.views.BaseList {
 					col.type == "Subject" ? "list-subject level" : "hidden-xs",
 					col.type == "Tag" ? `tag-col ${!this.tags_shown ? "hide" : ""} ` : "",
 					frappe.model.is_numeric_field(col.df) ? "text-right" : "",
+					this.has_period_filter(col) ? "has-period-filter" : "",
 				].join(" ");
 
 				let html = "";
@@ -1277,7 +1296,7 @@ frappe.views.ListView = class ListView extends frappe.views.BaseList {
 					const label = __(col.df?.label || col.type, null, col.df?.parent);
 					const title = __("Click to sort by {0}", [label]);
 					const attrs = fieldname ? `data-sort-by="${fieldname}" title="${title}"` : "";
-					html = `<span ${attrs}>${label}</span>`;
+					html = `<span ${attrs}>${label}</span>${this.get_period_filter_html(col)}`;
 				}
 
 				const headerFieldname = col.type === "Status" ? "status_field" : col.df?.fieldname;
@@ -1310,6 +1329,122 @@ frappe.views.ListView = class ListView extends frappe.views.BaseList {
 		`;
 
 		return this.get_header_html_skeleton($columns, right_html);
+	}
+
+	/**
+	 * Date and Datetime columns carry a header button that applies one of the predefined
+	 * periods (this week, last quarter, …) as a Timespan filter on that very column.
+	 */
+	has_period_filter(col) {
+		return col.type !== "Subject" && ["Date", "Datetime"].includes(col.df?.fieldtype);
+	}
+
+	get_period_filter_html(col) {
+		if (!this.has_period_filter(col)) return "";
+
+		return `
+			<span class="list-col-period-controls" data-period-fieldname="${col.df.fieldname}">
+				<button type="button" class="list-col-period-btn" title="${__("Filter by period")}">
+					${frappe.utils.icon("calendar-search", "sm")}
+				</button>
+				<button type="button" class="list-col-period-clear" title="${__("Clear period")}">
+					${frappe.utils.icon("x", "sm")}
+				</button>
+			</span>
+		`;
+	}
+
+	setup_period_filter() {
+		this.$result.on("click", ".list-col-period-clear", (e) => {
+			e.stopPropagation();
+			this.apply_period_filter(get_period_fieldname($(e.currentTarget)), "");
+		});
+
+		// the menus body-portal, so one left open would float over the next page
+		this.page.wrapper.on("hide", () => {
+			(this.period_dropdowns || []).forEach((dropdown) => dropdown.close("owner"));
+		});
+	}
+
+	setup_period_dropdowns() {
+		this.period_dropdowns = this.period_dropdowns || [];
+
+		this.$result.find(".list-col-period-btn").each((i, button) => {
+			if ($(button).data("period-dropdown")) return;
+
+			const fieldname = get_period_fieldname($(button));
+			const dropdown = new frappe.ui.Dropdown({
+				trigger: button,
+				options: () => this.get_period_menu_options(fieldname),
+			});
+			$(button).data("period-dropdown", dropdown);
+			this.period_dropdowns.push(dropdown);
+		});
+	}
+
+	destroy_period_dropdowns() {
+		(this.period_dropdowns || []).forEach((dropdown) => dropdown.destroy());
+		this.period_dropdowns = [];
+	}
+
+	get_period_menu_options(fieldname) {
+		const active = this.get_active_period(fieldname) || "";
+		const all_periods = get_period_options();
+
+		const values = COLUMN_PERIOD_VALUES.slice();
+		// a period picked from the filter menu can fall outside the subset — show it anyway,
+		// so the menu never contradicts the filter it is meant to reflect
+		if (active && !values.includes(active)) {
+			values.push(active);
+		}
+
+		const items = [{ label: __("Any time"), value: "" }];
+		for (const value of values) {
+			const known = all_periods.find((option) => option.value === value);
+			items.push({ label: known?.label || value, value });
+		}
+
+		return items.map((item) => ({
+			label: item.label,
+			selected: item.value === active,
+			onclick: () => this.apply_period_filter(fieldname, item.value),
+		}));
+	}
+
+	get_active_period(fieldname) {
+		const filter = this.filter_area
+			.get()
+			.find((f) => f[1] === fieldname && String(f[2]).toLowerCase() === "timespan");
+		return filter ? filter[3] : null;
+	}
+
+	/** A period replaces whatever filter the column already carries — an empty value clears it. */
+	async apply_period_filter(fieldname, value) {
+		await this.filter_area.remove(fieldname);
+		if (value) {
+			await this.filter_area.add(this.doctype, fieldname, "Timespan", value);
+		}
+	}
+
+	/** Keep the header buttons in sync with the filters set from anywhere else. */
+	update_period_filter_buttons() {
+		if (!this.filter_area) return;
+
+		this.$result.find(".list-col-period-controls").each((i, controls) => {
+			const $controls = $(controls);
+			const active = this.get_active_period($controls.attr("data-period-fieldname"));
+
+			// the column drives both the picker colour and the room left for the clear button
+			$controls.closest(".list-row-col").toggleClass("period-active", Boolean(active));
+			$controls
+				.find(".list-col-period-btn")
+				.attr(
+					"title",
+					active
+						? __("Period: {0}", [get_period_label(active) || active])
+						: __("Filter by period")
+				);
+		});
 	}
 
 	get_header_html_skeleton(left = "", right = "") {
@@ -1897,6 +2032,7 @@ frappe.views.ListView = class ListView extends frappe.views.BaseList {
 	setup_events() {
 		this.setup_filterable();
 		this.setup_sort_by();
+		this.setup_period_filter();
 		this.setup_list_click();
 		this.setup_drag_click();
 		this.setup_tag_visibility();
@@ -3349,4 +3485,24 @@ function ensure_list_virtualization_loaded() {
 	}
 
 	return list_view_virtualization_load_promise;
+}
+
+function get_period_fieldname($control) {
+	return $control.closest(".list-col-period-controls").attr("data-period-fieldname");
+}
+
+function get_period_options() {
+	return frappe.ui.filter_utils.get_timespan_options([
+		"Last",
+		"Yesterday",
+		"Today",
+		"Tomorrow",
+		"This",
+		"Next",
+	]);
+}
+
+/** Label of a period value, including the ones left out of COLUMN_PERIOD_VALUES. */
+function get_period_label(value) {
+	return get_period_options().find((option) => option.value === value)?.label;
 }
