@@ -66,6 +66,49 @@ context("Awesome Bar", () => {
 	// 	cy.get("@filter").should("have.value", "%anothertest%");
 	// });
 
+	it("pins the result picked twice for the same query", () => {
+		cy.window()
+			.its("frappe")
+			.then((frappe) => {
+				const awesome_bar = frappe.app.awesome_bar;
+				const runner_up = awesome_bar.build_options("todo")[1].value;
+
+				frappe.search.memory.record("todo", runner_up);
+				frappe.search.memory.record("todo", runner_up);
+
+				const pinned = awesome_bar.build_options("todo")[0];
+				expect(pinned.value).to.equal(runner_up);
+				expect(pinned.boosted_by_history).to.be.true;
+
+				// one contradicting pick is enough to let the better match win again
+				frappe.search.memory.record("todo", "something else");
+				expect(awesome_bar.build_options("todo")[0].value).to.not.equal(runner_up);
+
+				localStorage.removeItem("awesomebar_selections");
+			});
+	});
+
+	it("forgets a pin that has gone unused", () => {
+		cy.window()
+			.its("frappe")
+			.then((frappe) => {
+				const awesome_bar = frappe.app.awesome_bar;
+				const runner_up = awesome_bar.build_options("todo")[1].value;
+
+				frappe.search.memory.record("todo", runner_up);
+				frappe.search.memory.record("todo", runner_up);
+
+				const memory = frappe.search.memory.load();
+				memory["todo"].last_used = Date.now() - 60 * 24 * 60 * 60 * 1000;
+				localStorage.setItem("awesomebar_selections", JSON.stringify(memory));
+
+				expect(frappe.search.memory.recall("todo")).to.equal(null);
+				expect(awesome_bar.build_options("todo")[0].value).to.not.equal(runner_up);
+
+				localStorage.removeItem("awesomebar_selections");
+			});
+	});
+
 	it("navigates to another doctype, filter not bleeding", () => {
 		cy.get("@awesome_bar").type("web page");
 		cy.wait(150); // Wait a bit before hitting enter.
