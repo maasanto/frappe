@@ -49,7 +49,10 @@ frappe.search.utils = {
 
 		near_ties
 			.sort((a, b) => frecency_of(b) - frecency_of(a) || b.index - a.index)
-			.forEach((option, rank) => (option.index = scores_to_share[rank]));
+			.forEach((option, rank) => {
+				option.boosted_by_history = scores_to_share[rank] > option.index;
+				option.index = scores_to_share[rank];
+			});
 	},
 
 	results_to_hide: [],

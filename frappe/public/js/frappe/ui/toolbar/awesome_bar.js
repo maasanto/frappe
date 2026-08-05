@@ -145,6 +145,14 @@ frappe.search.AwesomeBar = class AwesomeBar {
 				}
 				let html = `<span>${__(d.label || d.value)}</span>`;
 
+				// --icon-stroke is what .icon paints with, so overriding it here is the
+				// only way to mute the glyph — a text colour class would not reach it.
+				if (d.boosted_by_history) {
+					html += `<span class="ml-2" style="--icon-stroke: var(--text-muted)" title="${__(
+						"Ranked higher because you open this often"
+					)}">${frappe.utils.icon("history", "xs")}</span>`;
+				}
+
 				if (d.description && d.value !== d.description) {
 					html +=
 						'<br><span class="text-muted ellipsis">' + __(d.description) + "</span>";
