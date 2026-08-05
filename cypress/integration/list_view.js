@@ -224,4 +224,39 @@ context("List View", () => {
 				});
 		}
 	);
+
+	it("filters by period from a date column header", { scrollBehavior: false }, () => {
+		// a document dated today keeps at least one row — an empty result hides the header
+		cy.window()
+			.its("frappe.datetime")
+			.invoke("get_today")
+			.then((today) => {
+				cy.insert_doc("ToDo", { description: "Period filter test", date: today });
+			});
+
+		cy.go_to_list("ToDo");
+		cy.clear_filters();
+
+		const date_column = '.list-row-head .list-row-col[data-fieldname="date"]';
+		const is_period_filter = (filter) =>
+			filter[1] === "date" && filter[2] === "Timespan" && filter[3] === "today";
+
+		cy.get(`${date_column} .list-col-period-btn`).click();
+		cy.get(".es-menu .es-menu__item").contains("Today").click();
+
+		cy.get(`${date_column}.period-active`).should("exist");
+		cy.window()
+			.its("cur_list")
+			.then((list) => {
+				expect(list.filter_area.get().some(is_period_filter)).to.be.true;
+			});
+
+		cy.get(`${date_column} .list-col-period-clear`).click();
+		cy.get(`${date_column}.period-active`).should("not.exist");
+		cy.window()
+			.its("cur_list")
+			.then((list) => {
+				expect(list.filter_area.get().some(is_period_filter)).to.be.false;
+			});
+	});
 });
