@@ -145,6 +145,14 @@ frappe.search.AwesomeBar = class AwesomeBar {
 				}
 				let html = `<span>${__(d.label || d.value)}</span>`;
 
+				// --icon-stroke is what .icon paints with, so overriding it here is the
+				// only way to mute the glyph — a text colour class would not reach it.
+				if (d.boosted_by_history) {
+					html += `<span class="ml-2" style="--icon-stroke: var(--text-muted)" title="${__(
+						"Ranked higher because you keep picking it for this search"
+					)}">${frappe.utils.icon("history", "xs")}</span>`;
+				}
+
 				if (d.description && d.value !== d.description) {
 					html +=
 						'<br><span class="text-muted ellipsis">' + __(d.description) + "</span>";
@@ -323,7 +331,10 @@ frappe.search.AwesomeBar = class AwesomeBar {
 		if (!remembered) return;
 
 		const pinned = options.find((option) => option.value === remembered);
-		if (pinned) pinned.index = Math.max(...options.map((option) => option.index)) + 1;
+		if (!pinned) return;
+
+		pinned.index = Math.max(...options.map((option) => option.index)) + 1;
+		pinned.boosted_by_history = true;
 	}
 
 	deduplicate(options) {
