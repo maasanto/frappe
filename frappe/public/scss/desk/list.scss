@@ -306,6 +306,57 @@ body.list-col-resizing {
 	}
 }
 
+// Period picker on date column headers. Absolutely placed so a long column label
+// can't push it out of the (overflow: hidden) header cell; the cell reserves room
+// for it so the label ellipsises instead of running underneath.
+.list-col-period-controls {
+	position: absolute;
+	inset-inline-end: 8px;
+	top: 50%;
+	transform: translateY(-50%);
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	background-color: var(--subtle-fg);
+
+	button {
+		display: flex;
+		align-items: center;
+		padding: 2px;
+		border: none;
+		border-radius: var(--radius);
+		background-color: transparent;
+		color: var(--text-muted);
+		transition: color 0.15s;
+
+		&:hover {
+			color: var(--text-color);
+		}
+	}
+
+	// The clear button only earns its place once the column actually carries a period.
+	// Nested so it outweighs the `button` rule above, which also sets display.
+	.list-col-period-clear {
+		display: none;
+	}
+}
+
+.list-row-head .list-row-col.has-period-filter {
+	padding-inline-end: 24px;
+
+	&.period-active {
+		padding-inline-end: 44px;
+
+		.list-col-period-btn {
+			color: var(--text-color);
+		}
+
+		.list-col-period-clear {
+			display: flex;
+		}
+	}
+}
+
 .list-row-head {
 	@extend .list-row;
 	cursor: default;
