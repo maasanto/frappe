@@ -1,11 +1,21 @@
 # Copyright (c) 2022, Frappe Technologies and contributors
 # License: MIT. See LICENSE
 
+from datetime import datetime
 from typing import Any
 
 import frappe
 from frappe.deferred_insert import deferred_insert as _deferred_insert
 from frappe.model.document import Document
+
+# Kept well inside the Route History retention window, which Log Settings defaults to
+# 30 days: decay can only separate visits that are still in the table, so cutting
+# retention to around one half-life quietly turns this back into a raw visit count.
+FRECENCY_HALF_LIFE_DAYS = 14
+MAX_LINKS = 50
+# Beyond this many visits the oldest ones are dropped: after a few half-lives they
+# contribute almost nothing, and boot must not pay for an unpruned history.
+MAX_SAMPLED_VISITS = 10_000
 
 
 class RouteHistory(Document):
@@ -46,26 +56,43 @@ def deferred_insert(routes: str | list[dict[str, Any]]):
 	_deferred_insert("Route History", routes)
 
 
+def frecency(visits: list[dict], now: datetime) -> dict[str, float]:
+	"""Score each route by how much *and* how recently it was visited.
+
+	A visit is worth 1 point on the day it happens and half that after every
+	FRECENCY_HALF_LIFE_DAYS, so a route used daily this week outranks one used
+	twice as often but abandoned a month ago. Raw counts can't express that.
+	"""
+	scores = {}
+	for visit in visits:
+		age_days = (now - visit["creation"]).total_seconds() / 86400
+		scores[visit["route"]] = scores.get(visit["route"], 0) + 0.5 ** (age_days / FRECENCY_HALF_LIFE_DAYS)
+	return scores
+
+
 @frappe.whitelist()
-def frequently_visited_links():
+def frequently_visited_links(limit: int = 5):
 	from frappe.desk.desk_views import DeskViews
 
-	# Fetch a larger candidate set since some entries may be filtered out
-	candidates = frappe.get_all(
+	limit = min(frappe.utils.cint(limit) or 5, MAX_LINKS)
+
+	# Decayed in Python rather than in SQL to stay portable across MariaDB and
+	# Postgres. Move the decay into the query if boot latency ever shows up.
+	visits = frappe.get_all(
 		"Route History",
-		fields=["route", {"COUNT": "name", "as": "count"}],
+		fields=["route", "creation"],
 		filters={"user": frappe.session.user},
-		group_by="route",
-		order_by="count desc",
-		limit=25,
+		order_by="creation desc",
+		limit=MAX_SAMPLED_VISITS,
 	)
+	scores = frecency(visits, frappe.utils.now_datetime())
 
 	allowed_report_names = set(DeskViews.get_allowed_reports(cache=True).keys())
 	result = []
-	for link in candidates:
-		if _is_permitted_link(link["route"], allowed_report_names):
-			result.append(link)
-		if len(result) == 5:
+	for route, score in sorted(scores.items(), key=lambda item: item[1], reverse=True):
+		if _is_permitted_link(route, allowed_report_names):
+			result.append({"route": route, "score": round(score, 3)})
+		if len(result) == limit:
 			break
 	return result
 

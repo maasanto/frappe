@@ -111,7 +111,8 @@ def get_bootinfo():
 	bootinfo.success_action = get_success_action()
 	bootinfo.update(get_email_accounts(user=frappe.session.user))
 	bootinfo.sms_gateway_enabled = bool(frappe.db.get_single_value("SMS Settings", "sms_gateway_url"))
-	bootinfo.frequently_visited_links = frequently_visited_links()
+	# More than the navbar shows: the extra entries feed the awesome bar's frecency boost.
+	bootinfo.frequently_visited_links = frequently_visited_links(limit=30)
 	bootinfo.link_preview_doctypes = get_link_preview_doctypes()
 	bootinfo.additional_filters_config = get_additional_filters_from_hooks()
 	bootinfo.desk_settings = get_desk_settings()
