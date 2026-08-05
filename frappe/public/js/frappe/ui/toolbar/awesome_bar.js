@@ -223,6 +223,8 @@ frappe.search.AwesomeBar = class AwesomeBar {
 			var value = o.text.value;
 			var item = awesomplete.get_item(value);
 
+			frappe.search.memory.record($input.val(), value);
+
 			if (item.route_options) {
 				frappe.route_options = item.route_options;
 			}
@@ -303,9 +305,25 @@ frappe.search.AwesomeBar = class AwesomeBar {
 			options = frappe.tags.utils.get_tags(txt);
 		}
 		var out = this.deduplicate(options);
+
+		this.pin_remembered_choice(out, txt);
+
 		return out.sort(function (a, b) {
 			return b.index - a.index;
 		});
+	}
+
+	/**
+	 * Scores the result this user keeps picking for this exact query above every
+	 * other match. Only touches what the search already matched, so a remembered
+	 * choice never reappears once it stops matching what is being typed.
+	 */
+	pin_remembered_choice(options, txt) {
+		const remembered = frappe.search.memory.recall(txt);
+		if (!remembered) return;
+
+		const pinned = options.find((option) => option.value === remembered);
+		if (pinned) pinned.index = Math.max(...options.map((option) => option.index)) + 1;
 	}
 
 	deduplicate(options) {

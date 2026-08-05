@@ -1,6 +1,12 @@
 frappe.provide("frappe.search");
 import { fuzzy_match } from "./fuzzy_match.js";
 
+const MEMORY_KEY = "awesomebar_selections";
+const MEMORY_MAX_QUERIES = 100;
+const MEMORY_MIN_CONFIDENCE = 0.7;
+// How long a remembered pick keeps half its weight once the query goes unused.
+const MEMORY_HALF_LIFE_DAYS = 14;
+
 frappe.search.utils = {
 	setup_recent: function () {
 		this.recent = JSON.parse(frappe.boot.user.recent || "[]") || [];
@@ -719,6 +725,88 @@ frappe.search.utils = {
 		});
 	},
 	searchable_functions: [],
+};
+
+/**
+ * Remembers what you picked for a given query, so typing "inv" twice and picking
+ * Sales Invoice both times pins it for "inv" from then on. Conditioned on the query
+ * rather than on the result, so it only fires where the habit was actually formed.
+ *
+ * Device-local by design: no schema, no boot payload, and nothing to migrate.
+ */
+frappe.search.memory = {
+	normalize(query) {
+		return (query || "").trim().toLowerCase().replace(/\s\s+/g, " ");
+	},
+
+	load() {
+		try {
+			return JSON.parse(localStorage.getItem(MEMORY_KEY)) || {};
+		} catch (e) {
+			return {};
+		}
+	},
+
+	/**
+	 * Laplace-smoothed selection rate, with both counters faded by how long the query
+	 * has gone unused. Two consistent picks earn a pin, a single contradiction drops
+	 * back below the threshold — a pin you can't correct in one action is worse than
+	 * no pin at all — and a pin you stop using expires without needing a contradiction.
+	 *
+	 * The fade applies to the totals rather than to each pick separately: keeping a
+	 * timestamp per pick would grow the payload to sharpen a tie-breaker.
+	 */
+	confidence(entry) {
+		const idle_days = entry.last_used
+			? (Date.now() - entry.last_used) / (24 * 60 * 60 * 1000)
+			: 0;
+		const weight = 0.5 ** (idle_days / MEMORY_HALF_LIFE_DAYS);
+		return (entry.hits * weight + 1) / ((entry.hits + entry.misses) * weight + 2);
+	},
+
+	record(query, value) {
+		const normalized_query = this.normalize(query);
+		if (normalized_query.length < 2) return;
+
+		const memory = this.load();
+		const entry = memory[normalized_query];
+		let updated;
+
+		if (!entry || (entry.value !== value && entry.misses + 1 >= entry.hits)) {
+			updated = { value: value, hits: 1, misses: 0 };
+		} else if (entry.value === value) {
+			updated = { ...entry, hits: entry.hits + 1 };
+		} else {
+			updated = { ...entry, misses: entry.misses + 1 };
+		}
+
+		// Reinserting moves the key to the end of the iteration order, so the eviction
+		// below drops the least recently used query rather than the oldest one.
+		delete memory[normalized_query];
+		memory[normalized_query] = { ...updated, last_used: Date.now() };
+
+		const queries = Object.keys(memory);
+		if (queries.length > MEMORY_MAX_QUERIES) delete memory[queries[0]];
+
+		try {
+			localStorage.setItem(MEMORY_KEY, JSON.stringify(memory));
+		} catch (e) {
+			// storage full or disabled: the boost is optional, dropping it is fine
+		}
+	},
+
+	recall(query) {
+		const normalized_query = this.normalize(query);
+		const memory = this.load();
+		const key = memory[normalized_query]
+			? normalized_query
+			: Object.keys(memory)
+					.filter((stored) => normalized_query.startsWith(stored))
+					.sort((a, b) => b.length - a.length)[0];
+
+		const entry = key && memory[key];
+		return entry && this.confidence(entry) > MEMORY_MIN_CONFIDENCE ? entry.value : null;
+	},
 };
 
 /** Closes the navbar Awesome Bar modal. */
