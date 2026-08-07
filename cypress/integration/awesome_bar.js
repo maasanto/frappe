@@ -99,7 +99,7 @@ context("Awesome Bar", () => {
 				frappe.search.memory.record("todo", runner_up);
 
 				const memory = frappe.search.memory.load();
-				memory["todo"].last_used = Date.now() - 60 * 24 * 60 * 60 * 1000;
+				memory["q:todo"].last_used = Date.now() - 60 * 24 * 60 * 60 * 1000;
 				localStorage.setItem("awesomebar_selections", JSON.stringify(memory));
 
 				expect(frappe.search.memory.recall("todo")).to.equal(null);

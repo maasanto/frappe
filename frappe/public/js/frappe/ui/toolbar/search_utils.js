@@ -2,6 +2,10 @@ frappe.provide("frappe.search");
 import { fuzzy_match } from "./fuzzy_match.js";
 
 const MEMORY_KEY = "awesomebar_selections";
+// Digit-only queries ("2024") would otherwise become integer-like object keys, which
+// JavaScript enumerates in numeric order before insertion order — silently breaking
+// the LRU eviction below.
+const MEMORY_KEY_PREFIX = "q:";
 const MEMORY_MAX_QUERIES = 100;
 const MEMORY_MIN_CONFIDENCE = 0.7;
 // How long a remembered pick keeps half its weight once the query goes unused.
@@ -769,7 +773,8 @@ frappe.search.memory = {
 		if (normalized_query.length < 2) return;
 
 		const memory = this.load();
-		const entry = memory[normalized_query];
+		const stored_key = MEMORY_KEY_PREFIX + normalized_query;
+		const entry = memory[stored_key];
 		let updated;
 
 		if (!entry || (entry.value !== value && entry.misses + 1 >= entry.hits)) {
@@ -782,8 +787,8 @@ frappe.search.memory = {
 
 		// Reinserting moves the key to the end of the iteration order, so the eviction
 		// below drops the least recently used query rather than the oldest one.
-		delete memory[normalized_query];
-		memory[normalized_query] = { ...updated, last_used: Date.now() };
+		delete memory[stored_key];
+		memory[stored_key] = { ...updated, last_used: Date.now() };
 
 		const queries = Object.keys(memory);
 		if (queries.length > MEMORY_MAX_QUERIES) delete memory[queries[0]];
@@ -798,10 +803,13 @@ frappe.search.memory = {
 	recall(query) {
 		const normalized_query = this.normalize(query);
 		const memory = this.load();
-		const key = memory[normalized_query]
-			? normalized_query
+		const stored_key = MEMORY_KEY_PREFIX + normalized_query;
+		const key = memory[stored_key]
+			? stored_key
 			: Object.keys(memory)
-					.filter((stored) => normalized_query.startsWith(stored))
+					.filter((stored) =>
+						normalized_query.startsWith(stored.slice(MEMORY_KEY_PREFIX.length))
+					)
 					.sort((a, b) => b.length - a.length)[0];
 
 		const entry = key && memory[key];
