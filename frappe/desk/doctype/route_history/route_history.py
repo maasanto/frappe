@@ -1,6 +1,7 @@
 # Copyright (c) 2022, Frappe Technologies and contributors
 # License: MIT. See LICENSE
 
+from collections import Counter
 from datetime import datetime
 from typing import Any
 
@@ -86,12 +87,15 @@ def frequently_visited_links(limit: int = 5):
 		limit=MAX_SAMPLED_VISITS,
 	)
 	scores = frecency(visits, frappe.utils.now_datetime())
+	# count is what this endpoint returned before frecency; kept so callers outside
+	# the awesome bar keep working.
+	counts = Counter(visit["route"] for visit in visits)
 
 	allowed_report_names = set(DeskViews.get_allowed_reports(cache=True).keys())
 	result = []
 	for route, score in sorted(scores.items(), key=lambda item: item[1], reverse=True):
 		if _is_permitted_link(route, allowed_report_names):
-			result.append({"route": route, "score": round(score, 3)})
+			result.append({"route": route, "count": counts[route], "score": round(score, 3)})
 		if len(result) == limit:
 			break
 	return result
