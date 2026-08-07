@@ -43,6 +43,37 @@ context("Awesome Bar", () => {
 		cy.location("pathname").should("eq", "/desk/todo");
 	});
 
+	it("lets frecency win a near-tie and marks the boosted result", () => {
+		cy.window()
+			.its("frappe")
+			.then((frappe) => {
+				const awesome_bar = frappe.app.awesome_bar;
+				const options = awesome_bar.build_options("todo");
+				// any result close enough to the top match to sit inside the frecency band
+				const runner_up = options.find(
+					(option) =>
+						option.route &&
+						option.value !== options[0].value &&
+						option.index >= options[0].index * 0.85
+				);
+
+				const original_frecency = frappe.search.utils.frecency;
+				frappe.search.utils.frecency = {
+					[frappe.search.utils.route_key(runner_up.route)]: 1000,
+				};
+
+				// ranking lives in `index`, not array order: Awesomplete re-sorts by it
+				const reranked = awesome_bar.build_options("todo");
+				const boosted = reranked.find((option) => option.value === runner_up.value);
+				const top_score = Math.max(...reranked.map((option) => option.index));
+
+				expect(boosted.index).to.equal(top_score);
+				expect(boosted.boosted_by_history).to.equal(true);
+
+				frappe.search.utils.frecency = original_frecency;
+			});
+	});
+
 	// it("finds text in doctype list", () => {
 	// 	cy.get("@awesome_bar").type("test in todo");
 	// 	cy.wait(150); // Wait a bit before hitting enter.
