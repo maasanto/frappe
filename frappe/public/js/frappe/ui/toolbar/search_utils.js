@@ -38,7 +38,9 @@ frappe.search.utils = {
 	 * Options must arrive sorted by `index` descending.
 	 */
 	rerank_by_frecency: function (options) {
-		if (!options.length) return;
+		// fuzzy_match can go negative on long labels, and a non-positive top score
+		// puts the multiplicative cutoff above it — nothing near-tie-worthy there anyway.
+		if (!options.length || options[0].index <= 0) return;
 
 		const cutoff = options[0].index * FRECENCY_BAND;
 		const near_ties = options.filter((option) => option.index >= cutoff);
@@ -179,7 +181,9 @@ frappe.search.utils = {
 				route: link.route,
 				label: label,
 				value: label,
-				index: link.score,
+				// score lives on its own scale; count keeps these comparable with the
+				// index 80 that get_recent_pages assigns in the same empty-query list.
+				index: link.count,
 			});
 		});
 		if (!options.length) {
