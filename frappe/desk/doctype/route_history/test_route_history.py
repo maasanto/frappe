@@ -3,8 +3,13 @@
 
 from datetime import datetime, timedelta
 
-from frappe.desk.doctype.route_history.route_history import FRECENCY_HALF_LIFE_DAYS, frecency
-from frappe.tests import UnitTestCase
+import frappe
+from frappe.desk.doctype.route_history.route_history import (
+	FRECENCY_HALF_LIFE_DAYS,
+	frecency,
+	frequently_visited_links,
+)
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 NOW = datetime(2026, 7, 30, 12, 0, 0)
 
@@ -43,3 +48,24 @@ class TestFrecency(UnitTestCase):
 		)
 
 		self.assertGreater(scores["List/Sales Invoice/List"], scores["List/Purchase Invoice/List"])
+
+
+class TestFrequentlyVisitedLinks(IntegrationTestCase):
+	def setUp(self):
+		frappe.db.delete("Route History", {"user": frappe.session.user})
+		for route, visit_count in (("List/Note/List", 3), ("List/ToDo/List", 1)):
+			for _ in range(visit_count):
+				frappe.get_doc(
+					{"doctype": "Route History", "route": route, "user": frappe.session.user}
+				).insert()
+
+	def test_payload_keeps_count_and_orders_by_score(self):
+		links = frequently_visited_links(limit=10)
+
+		self.assertEqual([link["route"] for link in links], ["List/Note/List", "List/ToDo/List"])
+		self.assertEqual(links[0]["count"], 3)
+		self.assertGreater(links[0]["score"], links[1]["score"])
+
+	def test_limit_cannot_be_talked_out_of_its_bounds(self):
+		self.assertEqual(len(frequently_visited_links(limit=-1)), 1)
+		self.assertEqual(len(frequently_visited_links(limit=1)), 1)
