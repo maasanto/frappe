@@ -746,19 +746,27 @@ frappe.search.memory = {
 		return (query || "").trim().toLowerCase().replace(/\s\s+/g, " ");
 	},
 
+	// localStorage is shared across every Frappe user of a browser profile — on a
+	// shared terminal one user's habits must not shape another user's ranking.
+	storage_key() {
+		return `${MEMORY_KEY}:${frappe.session.user}`;
+	},
+
 	load() {
 		try {
-			return JSON.parse(localStorage.getItem(MEMORY_KEY)) || {};
+			return JSON.parse(localStorage.getItem(this.storage_key())) || {};
 		} catch (e) {
+			// Corrupted storage: starting over only costs relearning a few picks.
 			return {};
 		}
 	},
 
 	/**
 	 * Laplace-smoothed selection rate, with both counters faded by how long the query
-	 * has gone unused. One pick earns a pin, a single contradiction drops back below the
-	 * threshold — a pin you can't correct in one action is worse than no pin at all —
-	 * and a pin you stop using expires without needing a contradiction.
+	 * has gone unused. One pick earns a pin and one contradicting pick corrects a fresh
+	 * one — it flips a single-pick pin outright and unpins a double-pick one — while a
+	 * habit repeated three or more times takes more than one stray pick to dislodge.
+	 * A pin you stop using expires without needing a contradiction at all.
 	 *
 	 * The fade applies to the totals rather than to each pick separately: keeping a
 	 * timestamp per pick would grow the payload to sharpen a tie-breaker.
@@ -797,7 +805,7 @@ frappe.search.memory = {
 		if (queries.length > MEMORY_MAX_QUERIES) delete memory[queries[0]];
 
 		try {
-			localStorage.setItem(MEMORY_KEY, JSON.stringify(memory));
+			localStorage.setItem(this.storage_key(), JSON.stringify(memory));
 		} catch (e) {
 			// storage full or disabled: the boost is optional, dropping it is fine
 		}
@@ -806,17 +814,16 @@ frappe.search.memory = {
 	recall(query) {
 		const normalized_query = this.normalize(query);
 		const memory = this.load();
-		const stored_key = MEMORY_KEY_PREFIX + normalized_query;
-		const key = memory[stored_key]
-			? stored_key
-			: Object.keys(memory)
-					.filter((stored) =>
-						normalized_query.startsWith(stored.slice(MEMORY_KEY_PREFIX.length))
-					)
-					.sort((a, b) => b.length - a.length)[0];
 
-		const entry = key && memory[key];
-		return entry && this.confidence(entry) > MEMORY_MIN_CONFIDENCE ? entry.value : null;
+		// The pick was recorded when the query was usually shorter than what's typed
+		// by now, so the longest stored prefix of the current query wins.
+		for (let length = normalized_query.length; length >= 2; length--) {
+			const entry = memory[MEMORY_KEY_PREFIX + normalized_query.slice(0, length)];
+			if (entry) {
+				return this.confidence(entry) > MEMORY_MIN_CONFIDENCE ? entry.value : null;
+			}
+		}
+		return null;
 	},
 };
 

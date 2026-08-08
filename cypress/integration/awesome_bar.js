@@ -10,6 +10,8 @@ context("Awesome Bar", () => {
 	});
 
 	beforeEach(() => {
+		// selecting a result in an earlier test records a pin that would leak here
+		cy.clearLocalStorage(/awesomebar_selections/);
 		cy.get("body").type("{esc}");
 		cy.wait(300);
 		// the global-search trigger moved from the page header into the workspace dock (icon only)
@@ -82,29 +84,24 @@ context("Awesome Bar", () => {
 				// one contradicting pick is enough to let the better match win again
 				frappe.search.memory.record("todo", "something else");
 				expect(awesome_bar.build_options("todo")[0].value).to.not.equal(runner_up);
-
-				localStorage.removeItem("awesomebar_selections");
 			});
 	});
 
 	it("forgets a pin that has gone unused", () => {
-		cy.window()
-			.its("frappe")
-			.then((frappe) => {
-				const awesome_bar = frappe.app.awesome_bar;
-				const runner_up = awesome_bar.build_options("todo")[1].value;
+		cy.window().then((win) => {
+			const frappe = win.frappe;
+			const awesome_bar = frappe.app.awesome_bar;
+			const runner_up = awesome_bar.build_options("todo")[1].value;
 
-				frappe.search.memory.record("todo", runner_up);
+			frappe.search.memory.record("todo", runner_up);
 
-				const memory = frappe.search.memory.load();
-				memory["q:todo"].last_used = Date.now() - 10 * 24 * 60 * 60 * 1000;
-				localStorage.setItem("awesomebar_selections", JSON.stringify(memory));
+			const memory = frappe.search.memory.load();
+			memory["q:todo"].last_used = Date.now() - 10 * 24 * 60 * 60 * 1000;
+			win.localStorage.setItem(frappe.search.memory.storage_key(), JSON.stringify(memory));
 
-				expect(frappe.search.memory.recall("todo")).to.equal(null);
-				expect(awesome_bar.build_options("todo")[0].value).to.not.equal(runner_up);
-
-				localStorage.removeItem("awesomebar_selections");
-			});
+			expect(frappe.search.memory.recall("todo")).to.equal(null);
+			expect(awesome_bar.build_options("todo")[0].value).to.not.equal(runner_up);
+		});
 	});
 
 	it("navigates to another doctype, filter not bleeding", () => {
