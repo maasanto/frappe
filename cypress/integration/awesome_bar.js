@@ -66,14 +66,13 @@ context("Awesome Bar", () => {
 	// 	cy.get("@filter").should("have.value", "%anothertest%");
 	// });
 
-	it("pins the result picked twice for the same query", () => {
+	it("pins the result picked for a query", () => {
 		cy.window()
 			.its("frappe")
 			.then((frappe) => {
 				const awesome_bar = frappe.app.awesome_bar;
 				const runner_up = awesome_bar.build_options("todo")[1].value;
 
-				frappe.search.memory.record("todo", runner_up);
 				frappe.search.memory.record("todo", runner_up);
 
 				const pinned = awesome_bar.build_options("todo")[0];
@@ -96,10 +95,9 @@ context("Awesome Bar", () => {
 				const runner_up = awesome_bar.build_options("todo")[1].value;
 
 				frappe.search.memory.record("todo", runner_up);
-				frappe.search.memory.record("todo", runner_up);
 
 				const memory = frappe.search.memory.load();
-				memory["q:todo"].last_used = Date.now() - 60 * 24 * 60 * 60 * 1000;
+				memory["q:todo"].last_used = Date.now() - 10 * 24 * 60 * 60 * 1000;
 				localStorage.setItem("awesomebar_selections", JSON.stringify(memory));
 
 				expect(frappe.search.memory.recall("todo")).to.equal(null);

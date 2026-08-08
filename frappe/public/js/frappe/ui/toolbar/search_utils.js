@@ -7,7 +7,10 @@ const MEMORY_KEY = "awesomebar_selections";
 // the LRU eviction below.
 const MEMORY_KEY_PREFIX = "q:";
 const MEMORY_MAX_QUERIES = 100;
-const MEMORY_MIN_CONFIDENCE = 0.7;
+// Low enough that a single pick already pins, the way Raycast and Alfred learn. What
+// makes that safe is the decay below: a one-off fades in about three idle days, while
+// a habit worth keeping lasts weeks.
+const MEMORY_MIN_CONFIDENCE = 0.65;
 // How long a remembered pick keeps half its weight once the query goes unused.
 const MEMORY_HALF_LIFE_DAYS = 14;
 
@@ -732,9 +735,9 @@ frappe.search.utils = {
 };
 
 /**
- * Remembers what you picked for a given query, so typing "inv" twice and picking
- * Sales Invoice both times pins it for "inv" from then on. Conditioned on the query
- * rather than on the result, so it only fires where the habit was actually formed.
+ * Remembers what you picked for a given query, so picking Sales Invoice once for "inv"
+ * pins it for "inv" next time. Conditioned on the query rather than on the result, so
+ * it only fires where the habit was actually formed.
  *
  * Device-local by design: no schema, no boot payload, and nothing to migrate.
  */
@@ -753,9 +756,9 @@ frappe.search.memory = {
 
 	/**
 	 * Laplace-smoothed selection rate, with both counters faded by how long the query
-	 * has gone unused. Two consistent picks earn a pin, a single contradiction drops
-	 * back below the threshold — a pin you can't correct in one action is worse than
-	 * no pin at all — and a pin you stop using expires without needing a contradiction.
+	 * has gone unused. One pick earns a pin, a single contradiction drops back below the
+	 * threshold — a pin you can't correct in one action is worse than no pin at all —
+	 * and a pin you stop using expires without needing a contradiction.
 	 *
 	 * The fade applies to the totals rather than to each pick separately: keeping a
 	 * timestamp per pick would grow the payload to sharpen a tie-breaker.
