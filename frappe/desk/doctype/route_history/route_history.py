@@ -10,7 +10,7 @@ from frappe.deferred_insert import deferred_insert as _deferred_insert
 from frappe.model.document import Document
 
 # Kept well inside the Route History retention window, which Log Settings defaults to
-# 30 days: decay can only separate visits that are still in the table, so cutting
+# 90 days: decay can only separate visits that are still in the table, so cutting
 # retention to around one half-life quietly turns this back into a raw visit count.
 FRECENCY_HALF_LIFE_DAYS = 14
 MAX_LINKS = 50
