@@ -64,10 +64,12 @@ def frecency(visits: list[dict], now: datetime) -> dict[str, float]:
 	FRECENCY_HALF_LIFE_DAYS, so a route used daily this week outranks one used
 	twice as often but abandoned a month ago. Raw counts can't express that.
 	"""
-	scores = {}
+	scores = Counter()
 	for visit in visits:
-		age_days = (now - visit["creation"]).total_seconds() / 86400
-		scores[visit["route"]] = scores.get(visit["route"], 0) + 0.5 ** (age_days / FRECENCY_HALF_LIFE_DAYS)
+		# Timestamps come from the browser clock via deferred_insert, so a visit can
+		# sit ahead of server time — it must never be worth more than one from right now.
+		age_days = max(0, (now - visit["creation"]).total_seconds() / 86400)
+		scores[visit["route"]] += 0.5 ** (age_days / FRECENCY_HALF_LIFE_DAYS)
 	return scores
 
 
@@ -75,7 +77,7 @@ def frecency(visits: list[dict], now: datetime) -> dict[str, float]:
 def frequently_visited_links(limit: int = 5):
 	from frappe.desk.desk_views import DeskViews
 
-	limit = min(frappe.utils.cint(limit) or 5, MAX_LINKS)
+	limit = min(max(frappe.utils.cint(limit) or 5, 1), MAX_LINKS)
 
 	# Decayed in Python rather than in SQL to stay portable across MariaDB and
 	# Postgres. Move the decay into the query if boot latency ever shows up.
@@ -99,7 +101,7 @@ def frequently_visited_links(limit: int = 5):
 	for route, score in sorted(scores.items(), key=lambda item: item[1], reverse=True):
 		if _is_permitted_link(route, allowed_report_names):
 			result.append({"route": route, "count": counts[route], "score": round(score, 3)})
-		if len(result) == limit:
+		if len(result) >= limit:
 			break
 	return result
 
