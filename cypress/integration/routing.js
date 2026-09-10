@@ -39,3 +39,54 @@ describe("SPA Routing", { scrollBehavior: false }, () => {
 		});
 	});
 });
+
+// The awesome bar ranks its results on Route History and offers desk Pages, single
+// doctypes and "New <doctype>" among them, so a destination the router declines to
+// record can never be ranked, however often it is opened.
+describe("Route history", { scrollBehavior: false }, () => {
+	// Held in a closure rather than an alias: Cypress clears aliases before every test,
+	// so one registered in `before` is gone by the time a test asks for it.
+	let saved_todo;
+
+	before(() => {
+		cy.login();
+		cy.insert_doc("ToDo", { description: "route history" }, true).then((todo) => {
+			saved_todo = todo.name;
+		});
+	});
+
+	function queued_routes(win) {
+		return win.frappe.route_history_queue.map((visit) => visit.route);
+	}
+
+	it("records a desk Page, which is a one-segment route", () => {
+		cy.visit("/desk/backups");
+		cy.window().should((win) => {
+			expect(queued_routes(win)).to.include("backups");
+		});
+	});
+
+	it("records a single, whose Form route repeats the doctype as the document name", () => {
+		cy.visit("/desk/system-settings");
+		cy.window().should((win) => {
+			expect(queued_routes(win)).to.include("Form/System Settings/System Settings");
+		});
+	});
+
+	it("records an unsaved draft", () => {
+		cy.visit("/desk/todo/new");
+		cy.window().should((win) => {
+			const drafts = queued_routes(win).filter((route) =>
+				route.startsWith("Form/ToDo/new-todo-")
+			);
+			expect(drafts).to.have.length.of.at.least(1);
+		});
+	});
+
+	it("leaves saved documents out, so they cannot bury the rest", () => {
+		cy.visit(`/desk/todo/${saved_todo}`);
+		cy.window().should((win) => {
+			expect(queued_routes(win)).to.not.include(`Form/ToDo/${saved_todo}`);
+		});
+	});
+});
