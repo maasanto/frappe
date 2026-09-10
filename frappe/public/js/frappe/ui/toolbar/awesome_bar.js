@@ -218,6 +218,7 @@ frappe.search.AwesomeBar = class AwesomeBar {
 		};
 
 		$input.on("focus", open_recent);
+		$input.on("focus", () => frappe.search.frecency.refresh());
 
 		$input.on("awesomplete-open", function (e) {
 			me.autocomplete_open = e.target;
@@ -231,6 +232,9 @@ frappe.search.AwesomeBar = class AwesomeBar {
 			var o = e.originalEvent;
 			var value = o.text.value;
 			var item = awesomplete.get_item(value);
+
+			// Read before the input is cleared below, which is where the query lives.
+			frappe.search.memory.record($input.val(), value);
 
 			if (item.route_options) {
 				frappe.route_options = item.route_options;
@@ -279,7 +283,10 @@ frappe.search.AwesomeBar = class AwesomeBar {
 
 	set_specifics(txt, end_txt) {
 		var me = this;
-		var results = this.build_options(txt);
+		// Candidates only: these are filtered by type and merged into the results for the
+		// full query, so ranking them against this prefix would score them out of context
+		// — and would rank, mark and trace the same keystroke twice.
+		var results = this.collect_options(txt);
 		results.forEach(function (r) {
 			if (r.type && r.type.toLowerCase().indexOf(end_txt.toLowerCase()) === 0) {
 				me.options.push(r);
@@ -295,6 +302,20 @@ frappe.search.AwesomeBar = class AwesomeBar {
 	}
 
 	build_options(txt) {
+		const out = this.collect_options(txt);
+
+		// The rerank wants the array sorted by index; the pin outranks the rerank.
+		frappe.search.frecency.rerank(out);
+		frappe.search.memory.pin(out, txt);
+		out.forEach(add_history_marker);
+
+		return out.sort(function (a, b) {
+			return b.index - a.index;
+		});
+	}
+
+	/** Every result matching `txt`, deduplicated and sorted by match quality. */
+	collect_options(txt) {
 		var options = frappe.search.utils
 			.get_creatables(txt)
 			.concat(
@@ -311,8 +332,7 @@ frappe.search.AwesomeBar = class AwesomeBar {
 		if (txt.charAt(0) === "#") {
 			options = frappe.tags.utils.get_tags(txt);
 		}
-		var out = this.deduplicate(options);
-		return out.sort(function (a, b) {
+		return this.deduplicate(options).sort(function (a, b) {
 			return b.index - a.index;
 		});
 	}
@@ -525,6 +545,26 @@ frappe.search.AwesomeBar = class AwesomeBar {
 		});
 	}
 };
+
+/**
+ * Nothing is promoted silently. A pin means "you picked this for this exact query", a
+ * clock means "you open this a lot" — two different reasons deserve two glyphs.
+ */
+function add_history_marker(option) {
+	if (!option.boosted_by_history) return;
+
+	const [icon_name, reason] = option.pinned_for_query
+		? ["pin", __("Ranked higher because you keep picking it for this search")]
+		: ["history", __("Ranked higher because you open this often")];
+
+	// --icon-stroke is what .icon paints with, so overriding it here is the only way to
+	// mute the glyph — a text colour class would not reach it.
+	option.label = `${
+		option.label || option.value
+	}<span class="ml-2" style="--icon-stroke: var(--text-muted)" title="${frappe.utils.escape_html(
+		reason
+	)}">${frappe.utils.icon(icon_name, "xs")}</span>`;
+}
 
 function first_route(route) {
 	return Array.isArray(route) ? route[0] : route;
