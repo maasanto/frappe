@@ -6,6 +6,7 @@ import json
 import frappe
 from frappe.integrations.utils import get_json, json_handler
 from frappe.model.document import Document
+from frappe.utils import add_days, now
 
 
 class IntegrationRequest(Document):
@@ -39,11 +40,8 @@ class IntegrationRequest(Document):
 			self.name = self.flags._name
 
 	def clear_old_logs(days=30):
-		from frappe.query_builder import Interval
-		from frappe.query_builder.functions import Now
-
 		table = frappe.qb.DocType("Integration Request")
-		frappe.db.delete(table, filters=(table.creation < (Now() - Interval(days=days))))
+		frappe.db.delete(table, filters=(table.creation < add_days(now(), -days)))
 
 	def update_status(self, params, status):
 		data = json.loads(self.data)

@@ -6,6 +6,7 @@ from typing import Any
 import frappe
 from frappe.deferred_insert import deferred_insert as _deferred_insert
 from frappe.model.document import Document
+from frappe.utils import add_days, now
 
 
 class RouteHistory(Document):
@@ -25,11 +26,8 @@ class RouteHistory(Document):
 
 	@staticmethod
 	def clear_old_logs(days=30):
-		from frappe.query_builder import Interval
-		from frappe.query_builder.functions import Now
-
 		table = frappe.qb.DocType("Route History")
-		frappe.db.delete(table, filters=(table.creation < (Now() - Interval(days=days))))
+		frappe.db.delete(table, filters=(table.creation < add_days(now(), -days)))
 
 
 @frappe.whitelist()

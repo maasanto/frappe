@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 import frappe
 from frappe.model.document import Document
+from frappe.utils import add_days, now
 
 PUBLISH_THROTTLE_SECONDS = 0.2
 
@@ -100,12 +101,11 @@ class BackgroundTask(Document):
 
 	@staticmethod
 	def clear_old_logs(days=7):
-		from frappe.query_builder import DocType, Interval
-		from frappe.query_builder.functions import Now
+		from frappe.query_builder import DocType
 
 		BgTask = DocType("Background Task")
 		File = DocType("File")
-		cutoff = Now() - Interval(days=days)
+		cutoff = add_days(now(), -days)
 
 		frappe.db.delete(
 			File,

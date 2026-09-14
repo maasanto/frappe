@@ -8,6 +8,7 @@ from frappe.desk.doctype.notification_settings.notification_settings import (
 	is_notifications_enabled,
 )
 from frappe.model.document import Document
+from frappe.utils import add_days, now
 from frappe.utils.caching import http_cache
 
 
@@ -71,11 +72,8 @@ class NotificationLog(Document):
 
 	@staticmethod
 	def clear_old_logs(days=180):
-		from frappe.query_builder import Interval
-		from frappe.query_builder.functions import Now
-
 		table = frappe.qb.DocType("Notification Log")
-		frappe.db.delete(table, filters=(table.creation < (Now() - Interval(days=days))))
+		frappe.db.delete(table, filters=(table.creation < add_days(now(), -days)))
 
 
 def _resolve_app_for_doctype(doctype: str) -> str | None:

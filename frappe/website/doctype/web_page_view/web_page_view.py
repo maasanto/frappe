@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 import frappe
 import frappe.utils
 from frappe.model.document import Document
+from frappe.utils import add_days, now
 from frappe.utils.caching import redis_cache
 
 
@@ -36,11 +37,8 @@ class WebPageView(Document):
 
 	@staticmethod
 	def clear_old_logs(days=180):
-		from frappe.query_builder import Interval
-		from frappe.query_builder.functions import Now
-
 		table = frappe.qb.DocType("Web Page View")
-		frappe.db.delete(table, filters=(table.creation < (Now() - Interval(days=days))))
+		frappe.db.delete(table, filters=(table.creation < add_days(now(), -days)))
 
 
 @frappe.whitelist(allow_guest=True)

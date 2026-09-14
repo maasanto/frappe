@@ -8,6 +8,7 @@ from frappe import _
 from frappe.desk.doctype.bulk_update.bulk_update import show_progress
 from frappe.model.document import Document
 from frappe.model.workflow import get_workflow_name
+from frappe.utils import add_days, now
 
 
 class DeletedDocument(Document):
@@ -32,11 +33,8 @@ class DeletedDocument(Document):
 
 	@staticmethod
 	def clear_old_logs(days=180):
-		from frappe.query_builder import Interval
-		from frappe.query_builder.functions import Now
-
 		table = frappe.qb.DocType("Deleted Document")
-		frappe.db.delete(table, filters=(table.creation < (Now() - Interval(days=days))))
+		frappe.db.delete(table, filters=(table.creation < add_days(now(), -days)))
 
 
 @frappe.whitelist()

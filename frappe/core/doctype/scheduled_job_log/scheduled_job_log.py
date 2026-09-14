@@ -3,8 +3,7 @@
 
 import frappe
 from frappe.model.document import Document
-from frappe.query_builder import Interval
-from frappe.query_builder.functions import Now
+from frappe.utils import add_days, now
 
 
 class ScheduledJobLog(Document):
@@ -27,4 +26,4 @@ class ScheduledJobLog(Document):
 	@staticmethod
 	def clear_old_logs(days=90):
 		table = frappe.qb.DocType("Scheduled Job Log")
-		frappe.db.delete(table, filters=(table.creation < (Now() - Interval(days=days))))
+		frappe.db.delete(table, filters=(table.creation < add_days(now(), -days)))

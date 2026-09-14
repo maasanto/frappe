@@ -3,8 +3,8 @@
 
 import frappe
 from frappe.model.document import Document
-from frappe.query_builder import Interval
-from frappe.query_builder.functions import Count, Date, Max, Min, Now
+from frappe.query_builder.functions import Count, Date, Max, Min
+from frappe.utils import add_days, now
 from frappe.utils.caching import http_cache
 
 
@@ -45,7 +45,7 @@ class ErrorLog(Document):
 	@staticmethod
 	def clear_old_logs(days=30):
 		table = frappe.qb.DocType("Error Log")
-		frappe.db.delete(table, filters=(table.creation < (Now() - Interval(days=days))))
+		frappe.db.delete(table, filters=(table.creation < add_days(now(), -days)))
 
 
 @frappe.whitelist()
@@ -99,7 +99,7 @@ def get_fingerprint_stats(fingerprint: str) -> dict:
 	timeline = (
 		frappe.qb.from_(table)
 		.where(table.fingerprint == fingerprint)
-		.where(table.creation >= (Now() - Interval(days=30)))
+		.where(table.creation >= add_days(now(), -30))
 		.groupby(Date(table.creation))
 		.orderby(Date(table.creation))
 		.select(Date(table.creation).as_("day"), Count("*").as_("count"))

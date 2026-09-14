@@ -10,7 +10,7 @@ from frappe import _
 from frappe.desk.doctype.notification_log.notification_log import enqueue_create_notification
 from frappe.model.document import Document
 from frappe.monitor import add_data_to_monitor
-from frappe.utils import now, time_diff_in_seconds
+from frappe.utils import add_days, now, time_diff_in_seconds
 from frappe.utils.data import cint
 
 
@@ -49,11 +49,8 @@ class SubmissionQueue(Document):
 
 	@staticmethod
 	def clear_old_logs(days=30):
-		from frappe.query_builder import Interval
-		from frappe.query_builder.functions import Now
-
 		table = frappe.qb.DocType("Submission Queue")
-		frappe.db.delete(table, filters=(table.creation < (Now() - Interval(days=days))))
+		frappe.db.delete(table, filters=(table.creation < add_days(now(), -days)))
 
 	def insert(self, to_be_queued_doc: Document, action: str):
 		self.status = "Queued"

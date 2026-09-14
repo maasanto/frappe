@@ -6,7 +6,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt
 
 import frappe
 from frappe.model.document import Document
-from frappe.utils import cstr
+from frappe.utils import add_days, cstr, now
 
 
 class AccessLog(Document):
@@ -34,11 +34,8 @@ class AccessLog(Document):
 
 	@staticmethod
 	def clear_old_logs(days=30):
-		from frappe.query_builder import Interval
-		from frappe.query_builder.functions import Now
-
 		table = frappe.qb.DocType("Access Log")
-		frappe.db.delete(table, filters=(table.creation < (Now() - Interval(days=days))))
+		frappe.db.delete(table, filters=(table.creation < add_days(now(), -days)))
 
 
 @frappe.whitelist()

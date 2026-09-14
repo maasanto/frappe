@@ -8,6 +8,7 @@ from frappe import qb
 from frappe.database import get_duckdb
 from frappe.database.duckdb.schema import DuckDBTable
 from frappe.model.document import Document
+from frappe.utils import add_days, now
 
 
 class DuckDBSync(Document):
@@ -72,14 +73,11 @@ class DuckDBSync(Document):
 
 	@staticmethod
 	def clear_old_logs(days=45):
-		from frappe.query_builder import Interval
-		from frappe.query_builder.functions import Now
-
 		duckdb_sync = frappe.qb.DocType("DuckDB Sync")
 		to_delete = (
 			frappe.qb.from_(duckdb_sync)
 			.select(duckdb_sync.name)
-			.where(duckdb_sync.modified < (Now() - Interval(days=days)))
+			.where(duckdb_sync.modified < add_days(now(), -days))
 		).run(as_dict=True, pluck="name")
 		for x in to_delete:
 			frappe.get_doc("DuckDB Sync", x).cancel()
