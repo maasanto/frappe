@@ -856,7 +856,6 @@ frappe.views.ListView = class ListView extends frappe.views.BaseList {
 
 	render_header(refresh_header = false) {
 		if (refresh_header) {
-			this.destroy_period_dropdowns();
 			this.$result.find(".list-row-head").remove();
 		}
 		if (this.$result.find(".list-row-head").length === 0) {
@@ -1366,25 +1365,23 @@ frappe.views.ListView = class ListView extends frappe.views.BaseList {
 		});
 	}
 
+	/**
+	 * render_list() drops the whole header along with the rows, so the trigger buttons are
+	 * new elements on every render — the dropdowns bound to the old ones have to go with them.
+	 */
 	setup_period_dropdowns() {
-		this.period_dropdowns = this.period_dropdowns || [];
-
-		this.$result.find(".list-col-period-btn").each((i, button) => {
-			if ($(button).data("period-dropdown")) return;
-
-			const fieldname = get_period_fieldname($(button));
-			const dropdown = new frappe.ui.Dropdown({
-				trigger: button,
-				options: () => this.get_period_menu_options(fieldname),
-			});
-			$(button).data("period-dropdown", dropdown);
-			this.period_dropdowns.push(dropdown);
-		});
-	}
-
-	destroy_period_dropdowns() {
 		(this.period_dropdowns || []).forEach((dropdown) => dropdown.destroy());
-		this.period_dropdowns = [];
+
+		this.period_dropdowns = this.$result
+			.find(".list-col-period-btn")
+			.map((i, button) => {
+				const fieldname = get_period_fieldname($(button));
+				return new frappe.ui.Dropdown({
+					trigger: button,
+					options: () => this.get_period_menu_options(fieldname),
+				});
+			})
+			.get();
 	}
 
 	get_period_menu_options(fieldname) {
