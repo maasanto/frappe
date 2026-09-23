@@ -1031,6 +1031,15 @@ Object.assign(frappe.utils, {
 		if (route[0] === "dashboard") {
 			return __(route[1]).bold() + " " + __("Dashboard");
 		}
+		// Route History records single doctypes, whose route repeats the doctype as the
+		// document name; without this they would all be labelled "Form". The name is
+		// user-supplied and this label is injected as HTML, so it goes through
+		// frappe.utils.bold rather than String.prototype.bold.
+		if (route[0] === "Form" && route[1]) {
+			return route[1] === route[2]
+				? frappe.utils.bold(__(route[1]))
+				: frappe.utils.bold(__(route[1])) + " " + frappe.utils.escape_html(route[2]);
+		}
 		return __(frappe.utils.to_title_case(__(route[0]), true));
 	},
 	report_column_total: function (values, column, type) {

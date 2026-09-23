@@ -1,6 +1,10 @@
 frappe.provide("frappe.search");
 import { fuzzy_match } from "./fuzzy_match.js";
 
+// The key visit_key (route_history.py) folds every draft of a doctype into. It is a
+// scoring key, not a route: nothing navigates to it.
+const NEW_DOCUMENT_KEY_PREFIX = "New/";
+
 frappe.search.utils = {
 	setup_recent: function () {
 		this.recent = JSON.parse(frappe.boot.user.recent || "[]") || [];
@@ -121,7 +125,10 @@ frappe.search.utils = {
 		});
 	},
 	get_frequent_links() {
-		const links = frappe.boot.frequently_visited_links;
+		// `New/<doctype>` opens nothing on its own, so it must never become a link here.
+		const links = frappe.boot.frequently_visited_links.filter(
+			(link) => !link.route.startsWith(NEW_DOCUMENT_KEY_PREFIX)
+		);
 		// The server already ordered these by frecency, so rank is what carries that order
 		// through — the payload's `count` is no longer what this list ranks on. Ranking
 		// rather than the score itself keeps them on the small-integer scale the visit

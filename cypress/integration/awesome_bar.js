@@ -45,6 +45,20 @@ context("Awesome Bar", () => {
 		cy.location("pathname").should("match", /\/todo$/);
 	});
 
+	// Route History now records singles, so their routes reach the navbar's frequent list.
+	it("labels a single by its doctype rather than as a Form", () => {
+		cy.window()
+			.its("frappe")
+			.then((frappe) => {
+				expect(
+					frappe.utils.get_route_label("Form/System Settings/System Settings")
+				).to.contain("System Settings");
+				expect(
+					frappe.utils.get_route_label("Form/System Settings/System Settings")
+				).to.not.equal("Form");
+			});
+	});
+
 	// it("finds text in doctype list", () => {
 	// 	cy.get("@awesome_bar").type("test in todo");
 	// 	cy.wait(150); // Wait a bit before hitting enter.

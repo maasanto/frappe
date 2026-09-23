@@ -4,12 +4,15 @@
 from datetime import date, timedelta
 
 import frappe
+from frappe.desk.desk_views import DeskViews
 from frappe.desk.doctype.route_history.route_history import (
 	FRECENCY_HALF_LIFE_DAYS,
 	FRECENCY_WINDOW_DAYS,
 	MAX_LINKS,
+	_is_permitted_link,
 	frequently_visited_links,
 	score_visits,
+	visit_key,
 )
 from frappe.tests import IntegrationTestCase, UnitTestCase
 
@@ -58,6 +61,81 @@ class TestScoreVisits(UnitTestCase):
 
 		self.assertAlmostEqual(scores["List/Item/List"], 1.0)
 
+	def test_drafts_of_a_doctype_are_scored_as_one_destination(self):
+		"""Counted raw, each draft is a singleton that never survives the boot cut."""
+		scores = score_visits(
+			visits("Form/Sales Invoice/new-sales-invoice-fjqbxlmzvd", 1, 0)
+			+ visits("Form/Sales Invoice/new-sales-invoice-qpwoeiruty", 1, 0),
+			TODAY,
+		)
+
+		self.assertEqual(list(scores), ["New/Sales Invoice"])
+		self.assertAlmostEqual(scores["New/Sales Invoice"], 2.0)
+
+
+class TestVisitKey(UnitTestCase):
+	def test_a_stored_document_keeps_its_own_route(self):
+		self.assertEqual(visit_key("Form/Quotation/QTN-0001"), "Form/Quotation/QTN-0001")
+
+	def test_the_prefix_is_anchored(self):
+		"""A stored document may be named anything, including something draft-shaped."""
+		self.assertEqual(
+			visit_key("Form/Quotation/QTN-new-quotation-0001"),
+			"Form/Quotation/QTN-new-quotation-0001",
+		)
+
+	def test_the_doctype_is_matched_whole(self):
+		"""Without the trailing dash `Quotation` would swallow every neighbouring doctype."""
+		self.assertEqual(
+			visit_key("Form/Quotation/new-quotationx-fjqbxlmzvd"),
+			"Form/Quotation/new-quotationx-fjqbxlmzvd",
+		)
+
+	def test_a_two_word_doctype_is_slugged(self):
+		self.assertEqual(visit_key("Form/Sales Invoice/new-sales-invoice-fjqbxlmzvd"), "New/Sales Invoice")
+
+	def test_other_routes_pass_through_untouched(self):
+		self.assertEqual(visit_key("List/Sales Invoice/List"), "List/Sales Invoice/List")
+		self.assertEqual(visit_key("bank-reconciliation"), "bank-reconciliation")
+
+
+class TestIsPermittedLink(IntegrationTestCase):
+	# Administrator short-circuits every permission check, so the filter can only be
+	# observed as someone else.
+	READER = "frecency-reader@example.com"
+
+	def setUp(self):
+		frappe.get_doc(
+			{
+				"doctype": "User",
+				"email": self.READER,
+				"first_name": "Jane",
+				"last_name": "Doe",
+				"send_welcome_email": 0,
+			}
+		).insert(ignore_if_duplicate=True)
+
+	def is_permitted(self, route: str) -> bool:
+		with self.set_user(self.READER):
+			return _is_permitted_link(route, DeskViews())
+
+	def test_a_route_naming_a_doctype_that_no_longer_exists_is_dropped(self):
+		"""Route History keeps routes long after the doctype behind them is renamed away."""
+		self.assertFalse(self.is_permitted("Form/No Such Doctype/No Such Doctype"))
+
+	def test_a_single_the_user_may_not_read_is_dropped(self):
+		self.assertFalse(self.is_permitted("Form/System Settings/System Settings"))
+
+	def test_a_page_the_user_may_not_open_is_dropped(self):
+		self.assertFalse(self.is_permitted("backups"))
+
+	def test_a_workspace_the_user_may_not_see_is_dropped(self):
+		self.assertFalse(self.is_permitted("Workspaces/No Such Workspace"))
+		self.assertFalse(self.is_permitted("Workspaces/private/No Such Workspace"))
+
+	def test_a_list_route_is_still_left_to_the_list_view(self):
+		self.assertTrue(self.is_permitted("List/System Settings/List"))
+
 
 class TestFrequentlyVisitedLinks(IntegrationTestCase):
 	def setUp(self):
@@ -102,3 +180,12 @@ class TestFrequentlyVisitedLinks(IntegrationTestCase):
 		)
 
 		self.assertNotIn("List/Blog Post/List", [link["route"] for link in frequently_visited_links()])
+
+	def test_drafts_reach_the_payload_folded_into_one_destination(self):
+		"""The fold happens before the top-N cut, or every draft arrives as a singleton."""
+		self.visit("Form/Note/new-note-fjqbxlmzvd", 1)
+		self.visit("Form/Note/new-note-qpwoeiruty", 1)
+
+		links = {link["route"]: link for link in frequently_visited_links()}
+
+		self.assertEqual(links["New/Note"]["count"], 2)

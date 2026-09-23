@@ -79,6 +79,13 @@ $.extend(frappe.model, {
 		return frappe.router.slug(`new-${doctype}-${frappe.utils.get_random(10)}`);
 	},
 
+	// Whether `name` is one get_new_name gave out for `doctype`. The trailing dash keeps
+	// `Quotation` from claiming a `Quotation Item` draft. is_new_document in
+	// route_history.py mirrors this server side.
+	is_new_name: function (doctype, name) {
+		return Boolean(name) && name.startsWith(frappe.router.slug(`new-${doctype}-`));
+	},
+
 	set_default_values: function (doc, parent_doc) {
 		let doctype = doc.doctype;
 		let docfields = frappe.meta.get_docfields(doctype);
