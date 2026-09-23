@@ -1,6 +1,23 @@
 frappe.provide("frappe.search");
 import { fuzzy_match } from "./fuzzy_match.js";
 
+// Results scoring within this fraction of the best match are close enough that personal
+// history, not the fuzzy score, should decide their order.
+const FRECENCY_BAND = 0.7;
+
+// fuzzy_match starts every match at 100 and scores quality either side of it, so a top
+// score just above 100 puts the multiplicative cutoff under the pedestal and makes every
+// result a near-tie. Hold the band there — below it the top match is weak too, and the
+// plain fraction is the only thing left to measure against.
+const FUZZY_BASE_SCORE = 100;
+
+// The same route is emitted by several of the get_* builders below, so the scores the
+// rerank redistributes contain duplicates — and Awesomplete's sort is stable, which
+// resolves a tie by the original position. Without a nudge a promoted result only ever
+// ties the copies that kept the top score, and renders behind them. Kept far below the
+// 0.01 offsets get_doctypes uses as tie-breakers.
+const RANK_EPSILON = 1e-6;
+
 // The key visit_key (route_history.py) folds every draft of a doctype into. It is a
 // scoring key, not a route: nothing navigates to it.
 const NEW_DOCUMENT_KEY_PREFIX = "New/";
@@ -125,10 +142,13 @@ frappe.search.utils = {
 		});
 	},
 	get_frequent_links() {
-		// `New/<doctype>` opens nothing on its own, so it must never become a link here.
-		const links = frappe.boot.frequently_visited_links.filter(
-			(link) => !link.route.startsWith(NEW_DOCUMENT_KEY_PREFIX)
-		);
+		// Boot carries more links than this list shows, and `New/<doctype>` among them:
+		// that key exists so frappe.search.frecency can score the routeless "New Invoice"
+		// option, and it opens nothing on its own, so it must never become a link here.
+		const links = frappe.search.frecency
+			.links()
+			.filter((link) => !link.route.startsWith(NEW_DOCUMENT_KEY_PREFIX))
+			.slice(0, 5);
 		// The server already ordered these by frecency, so rank is what carries that order
 		// through — the payload's `count` is no longer what this list ranks on. Ranking
 		// rather than the score itself keeps them on the small-integer scale the visit
@@ -400,6 +420,13 @@ frappe.search.utils = {
 					label: __("Open {0} Workspace", [search_result.marked_string || __(title)]),
 					value: __("Open {0} Workspace", [__(title)]),
 					index: level,
+					// The route Route History records it under, so frappe.search.frecency can
+					// rank it. Not `route`: that gives the item a real href and lets deduplicate
+					// merge it with a recent-page entry, both of which open the workspace
+					// without going through onclick.
+					frecency_route: workspace.public
+						? ["Workspaces", name]
+						: ["Workspaces", "private", name],
 					// open the workspace's sidebar and land on its first item; falls back to the
 					// workspace's own route when it has no sidebar items
 					onclick: function () {
@@ -731,6 +758,116 @@ frappe.search.utils = {
 		});
 	},
 	searchable_functions: [],
+};
+
+/**
+ * Ranks results by how much and how recently this user visits them. Scores are decayed
+ * server side; boot carries a copy so the first search ranks without waiting on a call.
+ */
+frappe.search.frecency = {
+	scores: null,
+	refreshed: false,
+
+	/** The scored links the ranking reads. */
+	links() {
+		return frappe.boot.frequently_visited_links || [];
+	},
+
+	/**
+	 * Bootinfo is cached per user with no expiry, so the scores it carries are as old as
+	 * the session and decay never moves them — the whole point of scoring by recency.
+	 * Re-read them once per page load, when the awesome bar is first opened.
+	 */
+	refresh() {
+		if (this.refreshed) return;
+		this.refreshed = true;
+		// Silent: a failure here must not pop a dialog just because the search box got
+		// focus. The boot copy keeps ranking in the meantime, and the next focus retries.
+		frappe
+			.xcall(
+				"frappe.desk.doctype.route_history.route_history.frequently_visited_links",
+				{},
+				"POST",
+				{ silent: true }
+			)
+			.then((links) => {
+				frappe.boot.frequently_visited_links = links;
+				this.load();
+			})
+			.catch((error) => {
+				this.refreshed = false;
+				console.warn("Could not refresh the awesome bar's visit history", error);
+			});
+	},
+
+	/**
+	 * Route History stores the visited route ("List/Sales Invoice/List") while awesome
+	 * bar options carry the route that opens it (["List", "Sales Invoice"]). Collapse
+	 * both to the same key so a list and its views count as one entry.
+	 */
+	route_key(route) {
+		const parts = typeof route === "string" ? route.split("/") : route;
+		const is_list_view = parts[0] === "List" && !["Report", "Inbox"].includes(parts[2]);
+		return (is_list_view ? parts.slice(0, 2) : parts).join("/");
+	},
+
+	// Summed, not assigned: a doctype's list, kanban and calendar routes all collapse to
+	// one key, and they are the same page as far as ranking goes.
+	load() {
+		this.scores = {};
+		this.links().forEach((link) => {
+			const key = this.route_key(link.route);
+			// A boot cached before this shipped carries no score; scoring it 0 leaves the
+			// match ranking alone, where NaN would spread through every comparison.
+			this.scores[key] = (this.scores[key] || 0) + (link.score || 0);
+		});
+		return this.scores;
+	},
+
+	score_of(option) {
+		if (!this.scores) this.load();
+		// "New Quotation" opens a form through a callback rather than a route, so it has
+		// no route to key on and `match` is the only place its doctype survives. The key
+		// is the one visit_key in route_history.py folds every draft of a doctype into.
+		if (option.type === "New") return this.scores[NEW_DOCUMENT_KEY_PREFIX + option.match] || 0;
+		const route = option.frecency_route || option.route;
+		return route ? this.scores[this.route_key(route)] || 0 : 0;
+	},
+
+	/**
+	 * Reorders only the results that are already near-ties on match quality, so a
+	 * frequently visited page can win a close call but never outrank a better match.
+	 *
+	 * Swaps their scores rather than their positions: Awesomplete re-sorts the list by
+	 * `index` before rendering, so anything expressed as array order is discarded.
+	 * Options must arrive sorted by `index` descending.
+	 */
+	rerank(options) {
+		// fuzzy_match can go negative on long labels, and a non-positive top score puts
+		// the multiplicative cutoff above it — nothing near-tie-worthy there anyway.
+		if (!options.length || options[0].index <= 0) return;
+
+		// Read before the loop below overwrites it, or the band is measured against
+		// whatever score landed on the first option instead of the best match.
+		const top_score = options[0].index;
+		const cutoff =
+			top_score > FUZZY_BASE_SCORE
+				? Math.max(top_score * FRECENCY_BAND, FUZZY_BASE_SCORE)
+				: top_score * FRECENCY_BAND;
+		const near_ties = options.filter((option) => option.index >= cutoff);
+		const scores_to_share = near_ties.map((option) => option.index);
+
+		// Comparing scores would miss a result that moved up without gaining one, which
+		// is what happens whenever the score it moved past was a duplicate of its own.
+		const rank_before = new Map(near_ties.map((option, rank) => [option, rank]));
+
+		near_ties
+			.sort((a, b) => this.score_of(b) - this.score_of(a) || b.index - a.index)
+			.forEach((option, rank) => {
+				option.boosted_by_history = rank < rank_before.get(option);
+				option.index = scores_to_share[rank] + (near_ties.length - rank) * RANK_EPSILON;
+			});
+	},
 };
 
 /** Closes the navbar Awesome Bar modal. */

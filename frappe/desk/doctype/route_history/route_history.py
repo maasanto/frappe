@@ -21,7 +21,9 @@ FRECENCY_HALF_LIFE_DAYS = 14.0
 # could not have changed an order. Deliberately wider than the default retention window:
 # what it bounds is the site that keeps Route History for a year, or forever.
 FRECENCY_WINDOW_DAYS = round(7 * FRECENCY_HALF_LIFE_DAYS)
-MAX_LINKS = 5
+# The navbar only lists the first few; the rest exist so the awesome bar has history on
+# candidates the navbar would never show.
+MAX_LINKS = 30
 
 
 class RouteHistory(Document):

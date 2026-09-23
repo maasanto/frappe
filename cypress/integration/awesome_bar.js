@@ -1,3 +1,11 @@
+// Kept in step with search_utils.js, whose constants are not reachable from here.
+const FRECENCY_BAND = 0.7;
+const FUZZY_BASE_SCORE = 100;
+const band_cutoff = (top_score) =>
+	top_score > FUZZY_BASE_SCORE
+		? Math.max(top_score * FRECENCY_BAND, FUZZY_BASE_SCORE)
+		: top_score * FRECENCY_BAND;
+
 context("Awesome Bar", () => {
 	before(() => {
 		cy.visit("/login");
@@ -43,6 +51,61 @@ context("Awesome Bar", () => {
 		// Matched on the end rather than the whole path: a desk URL carries the shell it opened
 		// in, and which shell owns ToDo is not what this test is about.
 		cy.location("pathname").should("match", /\/todo$/);
+	});
+
+	it("lets frecency win a near-tie and marks the result it moved up", () => {
+		cy.window()
+			.its("frappe")
+			.then((frappe) => {
+				const awesome_bar = frappe.app.awesome_bar;
+				const options = awesome_bar.build_options("todo");
+				// any result close enough to the top match to sit inside the frecency band
+				const runner_up = options.find(
+					(option) =>
+						option.route &&
+						option.value !== options[0].value &&
+						option.index >= band_cutoff(options[0].index)
+				);
+
+				const original_scores = frappe.search.frecency.scores;
+				frappe.search.frecency.scores = {
+					[frappe.search.frecency.route_key(runner_up.route)]: 1000,
+				};
+
+				// ranking lives in `index`, not array order: Awesomplete re-sorts by it
+				const reranked = awesome_bar.build_options("todo");
+				const boosted = reranked.find((option) => option.value === runner_up.value);
+
+				expect(boosted.index).to.equal(Math.max(...reranked.map((o) => o.index)));
+				expect(boosted.boosted_by_history).to.be.true;
+				expect(boosted.label).to.contain("icon-history");
+
+				frappe.search.frecency.scores = original_scores;
+			});
+	});
+
+	it("never pushes a better match below a worse one", () => {
+		cy.window()
+			.its("frappe")
+			.then((frappe) => {
+				// Scored here rather than searched for: which doctypes match a query depends
+				// on what is installed, and on a bare site every result for a short query is
+				// a variant of the same doctype, all of them inside the band.
+				const best = { value: "ToDo List", index: 190, route: ["List", "ToDo"] };
+				const weak = { value: "Note List", index: 60, route: ["List", "Note"] };
+
+				const original_scores = frappe.search.frecency.scores;
+				frappe.search.frecency.scores = {
+					[frappe.search.frecency.route_key(weak.route)]: 1000,
+				};
+
+				frappe.search.frecency.rerank([best, weak]);
+
+				expect(weak.index).to.be.lessThan(best.index);
+				expect(weak.boosted_by_history).to.not.be.true;
+
+				frappe.search.frecency.scores = original_scores;
+			});
 	});
 
 	// Route History now records singles, so their routes reach the navbar's frequent list.
