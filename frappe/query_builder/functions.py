@@ -463,6 +463,17 @@ class Cast_(Function):
 			return f"AS {type_sql}"
 
 
+# A timestamp's calendar day. Postgres has no DATE(); sqlite has no date type, so
+# CAST(x AS DATE) is a numeric cast there and returns the year rather than a day.
+CalendarDate = ImportMapper(
+	{
+		db_type_is.MARIADB: Date,
+		db_type_is.POSTGRES: lambda value, **kwargs: Cast_(value, "date", **kwargs),
+		db_type_is.SQLITE: Date,
+	}
+)
+
+
 def _aggregate(function, dt, fieldname, filters, **kwargs):
 	return (
 		frappe.qb.get_query(dt, filters=filters, fields=[function(PseudoColumn(fieldname))]).run(**kwargs)[0][

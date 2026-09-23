@@ -121,15 +121,20 @@ frappe.search.utils = {
 		});
 	},
 	get_frequent_links() {
-		let options = [];
-		frappe.boot.frequently_visited_links.forEach((link) => {
+		const links = frappe.boot.frequently_visited_links;
+		// The server already ordered these by frecency, so rank is what carries that order
+		// through — the payload's `count` is no longer what this list ranks on. Ranking
+		// rather than the score itself keeps them on the small-integer scale the visit
+		// count used — below get_recent_pages' index of 80, and never 0,
+		// which the dropdown's sort reads as "no index".
+		const options = links.map((link, rank) => {
 			const label = frappe.utils.get_route_label(link.route);
-			options.push({
+			return {
 				route: link.route,
 				label: label,
 				value: label,
-				index: link.count,
-			});
+				index: links.length - rank,
+			};
 		});
 		if (!options.length) {
 			return this.get_recent_pages("");
