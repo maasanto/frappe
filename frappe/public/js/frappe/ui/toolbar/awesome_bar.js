@@ -233,7 +233,7 @@ frappe.search.AwesomeBar = class AwesomeBar {
 			var value = o.text.value;
 			var item = awesomplete.get_item(value);
 
-			// Read before the input is cleared below, which is where the query lives.
+			// Before the input, which holds the query, is cleared below.
 			frappe.search.memory.record($input.val(), value);
 
 			if (item.route_options) {
@@ -283,9 +283,7 @@ frappe.search.AwesomeBar = class AwesomeBar {
 
 	set_specifics(txt, end_txt) {
 		var me = this;
-		// Candidates only: these are filtered by type and merged into the results for the
-		// full query, so ranking them against this prefix would score them out of context
-		// — and would rank, mark and trace the same keystroke twice.
+		// Unranked: they are merged into the full query's results, which are ranked there.
 		var results = this.collect_options(txt);
 		results.forEach(function (r) {
 			if (r.type && r.type.toLowerCase().indexOf(end_txt.toLowerCase()) === 0) {
@@ -304,7 +302,7 @@ frappe.search.AwesomeBar = class AwesomeBar {
 	build_options(txt) {
 		const out = this.collect_options(txt);
 
-		// The rerank wants the array sorted by index; the pin outranks the rerank.
+		// The rerank needs `out` sorted by index; the pin goes after it so it wins.
 		frappe.search.frecency.rerank(out);
 		frappe.search.memory.pin(out, txt, this.options);
 		out.forEach(add_history_marker);
@@ -314,7 +312,6 @@ frappe.search.AwesomeBar = class AwesomeBar {
 		});
 	}
 
-	/** Every result matching `txt`, deduplicated and sorted by match quality. */
 	collect_options(txt) {
 		var options = frappe.search.utils
 			.get_creatables(txt)
@@ -548,10 +545,6 @@ frappe.search.AwesomeBar = class AwesomeBar {
 	}
 };
 
-/**
- * Nothing is promoted silently. A pin means "you picked this for this exact query", a
- * clock means "you open this a lot" — two different reasons deserve two glyphs.
- */
 function add_history_marker(option) {
 	if (!option.boosted_by_history) return;
 
@@ -559,8 +552,7 @@ function add_history_marker(option) {
 		? ["pin", __("Ranked higher because you keep picking it for this search")]
 		: ["history", __("Ranked higher because you open this often")];
 
-	// --icon-stroke is what .icon paints with, so overriding it here is the only way to
-	// mute the glyph — a text colour class would not reach it.
+	// .icon paints with --icon-stroke, which a text colour class would not reach.
 	option.label = `${
 		option.label || option.value
 	}<span class="ml-2" style="--icon-stroke: var(--text-muted)" title="${frappe.utils.escape_html(

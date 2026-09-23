@@ -18,8 +18,7 @@ context("Awesome Bar", () => {
 	});
 
 	beforeEach(() => {
-		// a pin recorded by an earlier test would leak into this one, and the store is
-		// read into memory once, so clearing storage alone does not undo it
+		// The store is cached in the page, so clearing storage alone would leak pins.
 		cy.clearLocalStorage(/awesomebar_selections/);
 		cy.window().then((win) => {
 			win.frappe.search.memory.cache = null;
@@ -65,7 +64,6 @@ context("Awesome Bar", () => {
 			.then((frappe) => {
 				const awesome_bar = frappe.app.awesome_bar;
 				const options = awesome_bar.build_options("todo");
-				// any result close enough to the top match to sit inside the frecency band
 				const runner_up = options.find(
 					(option) =>
 						option.route &&
@@ -78,7 +76,7 @@ context("Awesome Bar", () => {
 					[frappe.search.frecency.route_key(runner_up.route)]: 1000,
 				};
 
-				// ranking lives in `index`, not array order: Awesomplete re-sorts by it
+				// Awesomplete sorts by `index`, not array order.
 				const reranked = awesome_bar.build_options("todo");
 				const boosted = reranked.find((option) => option.value === runner_up.value);
 
@@ -95,9 +93,7 @@ context("Awesome Bar", () => {
 		cy.window()
 			.its("frappe")
 			.then((frappe) => {
-				// Scored here rather than searched for: which doctypes match a query depends
-				// on what is installed, and on a bare site every result for a short query is
-				// a variant of the same doctype, all of them inside the band.
+				// Built by hand: on a bare site, every result for a short query is a near-tie.
 				const best = { value: "ToDo List", index: 190, route: ["List", "ToDo"] };
 				const weak = { value: "Note List", index: 60, route: ["List", "Note"] };
 
@@ -129,7 +125,6 @@ context("Awesome Bar", () => {
 				expect(pinned.pinned_for_query).to.be.true;
 				expect(pinned.label).to.contain("icon-pin");
 
-				// one contradicting pick is enough to let the better match win again
 				frappe.search.memory.record("todo", "something else");
 				expect(awesome_bar.build_options("todo")[0].value).to.not.equal(runner_up);
 			});
@@ -173,7 +168,6 @@ context("Awesome Bar", () => {
 			});
 	});
 
-	// Route History now records singles, so their routes reach the navbar's frequent list.
 	it("labels a single by its doctype rather than as a Form", () => {
 		cy.window()
 			.its("frappe")

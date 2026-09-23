@@ -1,38 +1,22 @@
 frappe.provide("frappe.search");
 import { fuzzy_match } from "./fuzzy_match.js";
 
-// Results scoring within this fraction of the best match are close enough that personal
-// history, not the fuzzy score, should decide their order.
+// Results within this fraction of the best match are ordered by history instead.
 const FRECENCY_BAND = 0.7;
-
-// fuzzy_match starts every match at 100 and scores quality either side of it, so a top
-// score just above 100 puts the multiplicative cutoff under the pedestal and makes every
-// result a near-tie. Hold the band there — below it the top match is weak too, and the
-// plain fraction is the only thing left to measure against.
+// fuzzy_match centres scores on 100; a band below it makes almost everything a near-tie.
 const FUZZY_BASE_SCORE = 100;
-
-// The same route is emitted by several of the get_* builders below, so the scores the
-// rerank redistributes contain duplicates — and Awesomplete's sort is stable, which
-// resolves a tie by the original position. Without a nudge a promoted result only ever
-// ties the copies that kept the top score, and renders behind them. Kept far below the
-// 0.01 offsets get_doctypes uses as tie-breakers.
+// Separates duplicate routes, whose ties Awesomplete's stable sort would keep.
 const RANK_EPSILON = 1e-6;
 
 const MEMORY_KEY = "awesomebar_selections";
-// Digit-only queries ("2024") would otherwise become integer-like object keys, which
-// JavaScript enumerates in numeric order before insertion order — silently breaking the
-// LRU eviction in frappe.search.memory.record.
+// Digit-only keys would iterate first and break the LRU eviction.
 const MEMORY_KEY_PREFIX = "q:";
 const MEMORY_MAX_QUERIES = 100;
-// Low enough that a single pick already pins, the way Raycast and Alfred learn. What
-// makes that safe is the decay: a one-off fades in about three idle days, while a habit
-// worth keeping lasts weeks.
+// One pick is enough to pin; the decay is what makes that safe.
 const MEMORY_MIN_CONFIDENCE = 0.65;
-// How long a remembered pick keeps half its weight once the query goes unused.
 const MEMORY_HALF_LIFE_DAYS = 14;
 
-// The key visit_key (route_history.py) folds every draft of a doctype into. It is a
-// scoring key, not a route: nothing navigates to it.
+// Scoring key for drafts (visit_key in route_history.py), not a route.
 const NEW_DOCUMENT_KEY_PREFIX = "New/";
 
 frappe.search.utils = {
@@ -155,18 +139,11 @@ frappe.search.utils = {
 		});
 	},
 	get_frequent_links() {
-		// Boot carries more links than this list shows, and `New/<doctype>` among them:
-		// that key exists so frappe.search.frecency can score the routeless "New Invoice"
-		// option, and it opens nothing on its own, so it must never become a link here.
 		const links = frappe.search.frecency
 			.links()
 			.filter((link) => !link.route.startsWith(NEW_DOCUMENT_KEY_PREFIX))
 			.slice(0, 5);
-		// The server already ordered these by frecency, so rank is what carries that order
-		// through — the payload's `count` is no longer what this list ranks on. Ranking
-		// rather than the score itself keeps them on the small-integer scale the visit
-		// count used — below get_recent_pages' index of 80, and never 0,
-		// which the dropdown's sort reads as "no index".
+		// Rank, not score: stays below recent pages (80) and never hits 0, which reads as unset.
 		const options = links.map((link, rank) => {
 			const label = frappe.utils.get_route_label(link.route);
 			return {
@@ -433,10 +410,7 @@ frappe.search.utils = {
 					label: __("Open {0} Workspace", [search_result.marked_string || __(title)]),
 					value: __("Open {0} Workspace", [__(title)]),
 					index: level,
-					// The route Route History records it under, so frappe.search.frecency can
-					// rank it. Not `route`: that gives the item a real href and lets deduplicate
-					// merge it with a recent-page entry, both of which open the workspace
-					// without going through onclick.
+					// Not `route`, which would bypass onclick through the href and deduplicate.
 					frecency_route: workspace.public
 						? ["Workspaces", name]
 						: ["Workspaces", "private", name],
@@ -773,29 +747,19 @@ frappe.search.utils = {
 	searchable_functions: [],
 };
 
-/**
- * Ranks results by how much and how recently this user visits them. Scores are decayed
- * server side; boot carries a copy so the first search ranks without waiting on a call.
- */
 frappe.search.frecency = {
 	scores: null,
 	refreshed: false,
 
-	/** The scored links the ranking reads. */
 	links() {
 		return frappe.boot.frequently_visited_links || [];
 	},
 
-	/**
-	 * Bootinfo is cached per user with no expiry, so the scores it carries are as old as
-	 * the session and decay never moves them — the whole point of scoring by recency.
-	 * Re-read them once per page load, when the awesome bar is first opened.
-	 */
+	// Boot is cached without expiry, so its scores would never decay.
 	refresh() {
 		if (this.refreshed) return;
 		this.refreshed = true;
-		// Silent: a failure here must not pop a dialog just because the search box got
-		// focus. The boot copy keeps ranking in the meantime, and the next focus retries.
+		// Silent: focusing the search box must not pop an error. The next focus retries.
 		frappe
 			.xcall(
 				"frappe.desk.doctype.route_history.route_history.frequently_visited_links",
@@ -813,25 +777,18 @@ frappe.search.frecency = {
 			});
 	},
 
-	/**
-	 * Route History stores the visited route ("List/Sales Invoice/List") while awesome
-	 * bar options carry the route that opens it (["List", "Sales Invoice"]). Collapse
-	 * both to the same key so a list and its views count as one entry.
-	 */
+	// Route History stores "List/Item/List" where options carry ["List", "Item"].
 	route_key(route) {
 		const parts = typeof route === "string" ? route.split("/") : route;
 		const is_list_view = parts[0] === "List" && !["Report", "Inbox"].includes(parts[2]);
 		return (is_list_view ? parts.slice(0, 2) : parts).join("/");
 	},
 
-	// Summed, not assigned: a doctype's list, kanban and calendar routes all collapse to
-	// one key, and they are the same page as far as ranking goes.
 	load() {
 		this.scores = {};
 		this.links().forEach((link) => {
 			const key = this.route_key(link.route);
-			// A boot cached before this shipped carries no score; scoring it 0 leaves the
-			// match ranking alone, where NaN would spread through every comparison.
+			// A boot cached before this change has no score.
 			this.scores[key] = (this.scores[key] || 0) + (link.score || 0);
 		});
 		return this.scores;
@@ -839,29 +796,16 @@ frappe.search.frecency = {
 
 	score_of(option) {
 		if (!this.scores) this.load();
-		// "New Quotation" opens a form through a callback rather than a route, so it has
-		// no route to key on and `match` is the only place its doctype survives. The key
-		// is the one visit_key in route_history.py folds every draft of a doctype into.
+		// "New <doctype>" has no route; its doctype is in `match`.
 		if (option.type === "New") return this.scores[NEW_DOCUMENT_KEY_PREFIX + option.match] || 0;
 		const route = option.frecency_route || option.route;
 		return route ? this.scores[this.route_key(route)] || 0 : 0;
 	},
 
-	/**
-	 * Reorders only the results that are already near-ties on match quality, so a
-	 * frequently visited page can win a close call but never outrank a better match.
-	 *
-	 * Swaps their scores rather than their positions: Awesomplete re-sorts the list by
-	 * `index` before rendering, so anything expressed as array order is discarded.
-	 * Options must arrive sorted by `index` descending.
-	 */
+	// Reorders near-ties only, by swapping their scores: Awesomplete sorts by `index`.
 	rerank(options) {
-		// fuzzy_match can go negative on long labels, and a non-positive top score puts
-		// the multiplicative cutoff above it — nothing near-tie-worthy there anyway.
 		if (!options.length || options[0].index <= 0) return;
 
-		// Read before the loop below overwrites it, or the band is measured against
-		// whatever score landed on the first option instead of the best match.
 		const top_score = options[0].index;
 		const cutoff =
 			top_score > FUZZY_BASE_SCORE
@@ -869,9 +813,7 @@ frappe.search.frecency = {
 				: top_score * FRECENCY_BAND;
 		const near_ties = options.filter((option) => option.index >= cutoff);
 		const scores_to_share = near_ties.map((option) => option.index);
-
-		// Comparing scores would miss a result that moved up without gaining one, which
-		// is what happens whenever the score it moved past was a duplicate of its own.
+		// Compared by rank: moving past a duplicate score gains no score.
 		const rank_before = new Map(near_ties.map((option, rank) => [option, rank]));
 
 		near_ties
@@ -883,26 +825,18 @@ frappe.search.frecency = {
 	},
 };
 
-/**
- * Remembers what you picked for a given query, so picking Sales Invoice once for "inv"
- * pins it for "inv" next time. Conditioned on the query rather than on the result, so it
- * only fires where the habit was actually formed.
- *
- * Device-local by design: no schema, no boot payload, and nothing to migrate.
- */
+// Remembers the result picked for a query, on this device only.
 frappe.search.memory = {
 	normalize(query) {
 		return (query || "").trim().toLowerCase().replace(/\s\s+/g, " ");
 	},
 
-	// localStorage is shared across every Frappe user of a browser profile — on a shared
-	// terminal one user's habits must not shape another user's ranking.
+	// Per user: a browser profile can be shared.
 	storage_key() {
 		return `${MEMORY_KEY}:${frappe.session.user}`;
 	},
 
-	// Read once and kept in memory: recall runs on every keystroke, and re-parsing the
-	// whole store that often is work no keystroke should pay for.
+	// recall runs on every keystroke.
 	cache: null,
 
 	load() {
@@ -910,22 +844,13 @@ frappe.search.memory = {
 		try {
 			this.cache = JSON.parse(localStorage.getItem(this.storage_key())) || {};
 		} catch (e) {
-			// Corrupted storage: starting over only costs relearning a few picks.
+			// corrupted storage only costs relearning a few picks
 			this.cache = {};
 		}
 		return this.cache;
 	},
 
-	/**
-	 * Laplace-smoothed selection rate, with both counters faded by how long the query has
-	 * gone unused. One pick earns a pin and one contradicting pick corrects a fresh one —
-	 * it flips a single-pick pin outright and unpins a double-pick one — while a habit
-	 * repeated three or more times takes more than one stray pick to dislodge. A pin you
-	 * stop using expires without needing a contradiction at all.
-	 *
-	 * The fade applies to the totals rather than to each pick separately: keeping a
-	 * timestamp per pick would grow the payload to sharpen a tie-breaker.
-	 */
+	// Laplace-smoothed pick rate, faded by how long the query has gone unused.
 	confidence(entry) {
 		const weight = this.fade(entry);
 		return (entry.hits * weight + 1) / ((entry.hits + entry.misses) * weight + 2);
@@ -947,9 +872,7 @@ frappe.search.memory = {
 		const entry = memory[stored_key];
 		let updated;
 
-		// Faded before they are weighed and stored: the write below resets last_used, so
-		// raw counts would revive an expired pin at full strength on the very pick that
-		// contradicts it.
+		// Faded first: the write resets last_used, which would revive an expired pin.
 		const weight = entry ? this.fade(entry) : 1;
 		const hits = entry ? entry.hits * weight : 0;
 		const misses = entry ? entry.misses * weight : 0;
@@ -962,8 +885,7 @@ frappe.search.memory = {
 			updated = { value: entry.value, hits: hits, misses: misses + 1 };
 		}
 
-		// Reinserting moves the key to the end of the iteration order, so the eviction
-		// below drops the least recently used query rather than the oldest one.
+		// Reinserted so the eviction below drops the least recently used query.
 		delete memory[stored_key];
 		memory[stored_key] = { ...updated, last_used: Date.now() };
 
@@ -973,7 +895,7 @@ frappe.search.memory = {
 		try {
 			localStorage.setItem(this.storage_key(), JSON.stringify(memory));
 		} catch (e) {
-			// storage full or disabled: the boost is optional, dropping it is fine
+			// storage full or disabled: the boost is optional
 		}
 	},
 
@@ -981,10 +903,7 @@ frappe.search.memory = {
 		const normalized_query = this.normalize(query);
 		const memory = this.load();
 
-		// The pick was recorded when the query was usually shorter than what's typed by
-		// now, so the longest stored prefix of the current query wins. A prefix that is
-		// stored but not yet trusted is skipped rather than taken as an answer: typing one
-		// more letter must not drop a pin the shorter query still earns.
+		// Longest trusted prefix: picks are usually recorded on a shorter query.
 		for (let length = normalized_query.length; length >= 2; length--) {
 			const entry = memory[MEMORY_KEY_PREFIX + normalized_query.slice(0, length)];
 			if (entry && this.confidence(entry) > MEMORY_MIN_CONFIDENCE) {
@@ -994,20 +913,12 @@ frappe.search.memory = {
 		return null;
 	},
 
-	/**
-	 * Scores the result this user keeps picking for this exact query above every other
-	 * match. Only touches what the search already matched, so a remembered choice never
-	 * reappears once it stops matching what is being typed. `rivals` are the results
-	 * already on the list that it must also outrank, like "Search for …".
-	 */
+	// `rivals` are results already on the list, like "Search for …".
 	pin(options, query, rivals = []) {
 		const remembered = this.recall(query);
 		if (!remembered) return;
 
-		// Every copy, not just the first. deduplicate keeps one option per source for
-		// anything carrying a description, so a route reachable as both a doctype and a
-		// desk entry survives twice — pinning one would leave the pair split apart in the
-		// ranking, with only one carrying the history marker.
+		// Every copy: deduplicate keeps one per source for options with a description.
 		const pinned = options.filter((option) => option.value === remembered);
 		if (!pinned.length) return;
 

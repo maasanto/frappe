@@ -40,12 +40,8 @@ describe("SPA Routing", { scrollBehavior: false }, () => {
 	});
 });
 
-// The awesome bar ranks its results on Route History and offers desk Pages, single
-// doctypes and "New <doctype>" among them, so a destination the router declines to
-// record can never be ranked, however often it is opened.
 describe("Route history", { scrollBehavior: false }, () => {
-	// Held in a closure rather than an alias: Cypress clears aliases before every test,
-	// so one registered in `before` is gone by the time a test asks for it.
+	// Not an alias: Cypress clears aliases before each test.
 	let saved_todo;
 
 	before(() => {
@@ -86,9 +82,7 @@ describe("Route history", { scrollBehavior: false }, () => {
 	it("leaves saved documents out, so they cannot bury the rest", () => {
 		cy.visit(`/desk/todo/${saved_todo}`);
 		cy.window().its("cur_frm.doc.name").should("eq", saved_todo);
-		// A negative assertion passes before anything is queued, so move on to a route that
-		// is recorded and wait for it: the queue is in visit order, so by then the form's
-		// own route change has been decided too.
+		// Wait for a later recorded route first: a bare negative assertion passes too early.
 		cy.window().then((win) => win.frappe.set_route("List", "ToDo"));
 		cy.window().should((win) => {
 			expect(queued_routes(win)).to.include("List/ToDo/List");

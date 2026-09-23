@@ -463,8 +463,7 @@ class Cast_(Function):
 			return f"AS {type_sql}"
 
 
-# A timestamp's calendar day. Postgres has no DATE(); sqlite has no date type, so
-# CAST(x AS DATE) is a numeric cast there and returns the year rather than a day.
+# Postgres has no DATE(), and sqlite's CAST(x AS DATE) returns the year.
 CalendarDate = ImportMapper(
 	{
 		db_type_is.MARIADB: Date,

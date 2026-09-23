@@ -51,7 +51,6 @@ class TestScoreVisits(UnitTestCase):
 		self.assertGreater(scores["List/Sales Invoice/List"], scores["List/Purchase Invoice/List"])
 
 	def test_a_days_visits_are_worth_their_count(self):
-		"""Buckets carry a count; scoring one as a single visit would flatten heavy days."""
 		scores = score_visits(visits("List/Item/List", 7, 0), TODAY)
 
 		self.assertAlmostEqual(scores["List/Item/List"], 7.0)
@@ -62,7 +61,6 @@ class TestScoreVisits(UnitTestCase):
 		self.assertAlmostEqual(scores["List/Item/List"], 1.0)
 
 	def test_drafts_of_a_doctype_are_scored_as_one_destination(self):
-		"""Counted raw, each draft is a singleton that never survives the boot cut."""
 		scores = score_visits(
 			visits("Form/Sales Invoice/new-sales-invoice-fjqbxlmzvd", 1, 0)
 			+ visits("Form/Sales Invoice/new-sales-invoice-qpwoeiruty", 1, 0),
@@ -78,14 +76,12 @@ class TestVisitKey(UnitTestCase):
 		self.assertEqual(visit_key("Form/Quotation/QTN-0001"), "Form/Quotation/QTN-0001")
 
 	def test_the_prefix_is_anchored(self):
-		"""A stored document may be named anything, including something draft-shaped."""
 		self.assertEqual(
 			visit_key("Form/Quotation/QTN-new-quotation-0001"),
 			"Form/Quotation/QTN-new-quotation-0001",
 		)
 
 	def test_the_doctype_is_matched_whole(self):
-		"""Without the trailing dash `Quotation` would swallow every neighbouring doctype."""
 		self.assertEqual(
 			visit_key("Form/Quotation/new-quotationx-fjqbxlmzvd"),
 			"Form/Quotation/new-quotationx-fjqbxlmzvd",
@@ -100,8 +96,7 @@ class TestVisitKey(UnitTestCase):
 
 
 class TestIsPermittedLink(IntegrationTestCase):
-	# Administrator short-circuits every permission check, so the filter can only be
-	# observed as someone else.
+	# Administrator passes every permission check.
 	READER = "frecency-reader@example.com"
 
 	def setUp(self):
@@ -120,7 +115,6 @@ class TestIsPermittedLink(IntegrationTestCase):
 			return _is_permitted_link(route, DeskViews())
 
 	def test_a_route_naming_a_doctype_that_no_longer_exists_is_dropped(self):
-		"""Route History keeps routes long after the doctype behind them is renamed away."""
 		self.assertFalse(self.is_permitted("Form/No Such Doctype/No Such Doctype"))
 
 	def test_a_single_the_user_may_not_read_is_dropped(self):
@@ -163,15 +157,12 @@ class TestFrequentlyVisitedLinks(IntegrationTestCase):
 		self.assertEqual(links[0]["count"], 3)
 
 	def test_the_payload_is_capped(self):
-		"""Boot carries this list, so a heavy user's history must not decide its size."""
 		for i in range(MAX_LINKS + 5):
 			self.visit(f"List/Note {i}/List", 1)
 
 		self.assertEqual(len(frequently_visited_links()), MAX_LINKS)
 
 	def test_visits_older_than_the_scoring_window_are_left_out(self):
-		"""They are worth under 1% of a visit from today, so all they can cost is the scan
-		— and on a site that never trims Route History they would be the bulk of it."""
 		stale = self.visit("List/Blog Post/List", 1)
 		stale.db_set(
 			"creation",
@@ -182,7 +173,6 @@ class TestFrequentlyVisitedLinks(IntegrationTestCase):
 		self.assertNotIn("List/Blog Post/List", [link["route"] for link in frequently_visited_links()])
 
 	def test_drafts_reach_the_payload_folded_into_one_destination(self):
-		"""The fold happens before the top-N cut, or every draft arrives as a singleton."""
 		self.visit("Form/Note/new-note-fjqbxlmzvd", 1)
 		self.visit("Form/Note/new-note-qpwoeiruty", 1)
 

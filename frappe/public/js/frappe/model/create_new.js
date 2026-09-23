@@ -79,9 +79,7 @@ $.extend(frappe.model, {
 		return frappe.router.slug(`new-${doctype}-${frappe.utils.get_random(10)}`);
 	},
 
-	// Whether `name` is one get_new_name gave out for `doctype`. The trailing dash keeps
-	// `Quotation` from claiming a `Quotation Item` draft. is_new_document in
-	// route_history.py mirrors this server side.
+	// The trailing dash keeps `Quotation` off `Quotation Item` drafts. Mirrored in route_history.py.
 	is_new_name: function (doctype, name) {
 		return Boolean(name) && name.startsWith(frappe.router.slug(`new-${doctype}-`));
 	},
