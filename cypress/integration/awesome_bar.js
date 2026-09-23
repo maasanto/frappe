@@ -18,6 +18,12 @@ context("Awesome Bar", () => {
 	});
 
 	beforeEach(() => {
+		// a pin recorded by an earlier test would leak into this one, and the store is
+		// read into memory once, so clearing storage alone does not undo it
+		cy.clearLocalStorage(/awesomebar_selections/);
+		cy.window().then((win) => {
+			win.frappe.search.memory.cache = null;
+		});
 		cy.get("body").type("{esc}");
 		cy.wait(300);
 		// the global-search trigger moved from the page header into the sidebar's standard-items
@@ -78,6 +84,7 @@ context("Awesome Bar", () => {
 
 				expect(boosted.index).to.equal(Math.max(...reranked.map((o) => o.index)));
 				expect(boosted.boosted_by_history).to.be.true;
+				expect(boosted.pinned_for_query).to.be.undefined;
 				expect(boosted.label).to.contain("icon-history");
 
 				frappe.search.frecency.scores = original_scores;
@@ -108,6 +115,64 @@ context("Awesome Bar", () => {
 			});
 	});
 
+	it("pins the result picked for a query, and unlearns it when contradicted", () => {
+		cy.window()
+			.its("frappe")
+			.then((frappe) => {
+				const awesome_bar = frappe.app.awesome_bar;
+				const runner_up = awesome_bar.build_options("todo")[1].value;
+
+				frappe.search.memory.record("todo", runner_up);
+
+				const pinned = awesome_bar.build_options("todo")[0];
+				expect(pinned.value).to.equal(runner_up);
+				expect(pinned.pinned_for_query).to.be.true;
+				expect(pinned.label).to.contain("icon-pin");
+
+				// one contradicting pick is enough to let the better match win again
+				frappe.search.memory.record("todo", "something else");
+				expect(awesome_bar.build_options("todo")[0].value).to.not.equal(runner_up);
+			});
+	});
+
+	it("forgets a pin that has gone unused", () => {
+		cy.window().then((win) => {
+			const frappe = win.frappe;
+			const awesome_bar = frappe.app.awesome_bar;
+			const runner_up = awesome_bar.build_options("todo")[1].value;
+
+			frappe.search.memory.record("todo", runner_up);
+
+			const memory = frappe.search.memory.load();
+			memory["q:todo"].last_used = Date.now() - 10 * 24 * 60 * 60 * 1000;
+			win.localStorage.setItem(frappe.search.memory.storage_key(), JSON.stringify(memory));
+
+			expect(frappe.search.memory.recall("todo")).to.equal(null);
+			expect(awesome_bar.build_options("todo")[0].value).to.not.equal(runner_up);
+		});
+	});
+
+	it("keeps a trusted shorter prefix when the longer one is still undecided", () => {
+		cy.window()
+			.its("frappe")
+			.then((frappe) => {
+				const awesome_bar = frappe.app.awesome_bar;
+				const remembered = awesome_bar.build_options("todo")[1].value;
+
+				// "tod" becomes a settled habit
+				frappe.search.memory.record("tod", remembered);
+				frappe.search.memory.record("tod", remembered);
+				frappe.search.memory.record("tod", remembered);
+				// "todo" is stored but contested, so it has nothing to say yet
+				frappe.search.memory.record("todo", remembered);
+				frappe.search.memory.record("todo", remembered);
+				frappe.search.memory.record("todo", "something else");
+
+				expect(frappe.search.memory.recall("todo")).to.equal(remembered);
+				expect(awesome_bar.build_options("todo")[0].value).to.equal(remembered);
+			});
+	});
+
 	// Route History now records singles, so their routes reach the navbar's frequent list.
 	it("labels a single by its doctype rather than as a Form", () => {
 		cy.window()
@@ -119,6 +184,18 @@ context("Awesome Bar", () => {
 				expect(
 					frappe.utils.get_route_label("Form/System Settings/System Settings")
 				).to.not.equal("Form");
+			});
+	});
+
+	it("keeps a remembered pick out of the way once it stops matching", () => {
+		cy.window()
+			.its("frappe")
+			.then((frappe) => {
+				const awesome_bar = frappe.app.awesome_bar;
+				frappe.search.memory.record("todo", "ToDo List");
+
+				const other_query = awesome_bar.build_options("web page");
+				expect(other_query.map((option) => option.value)).to.not.include("ToDo List");
 			});
 	});
 

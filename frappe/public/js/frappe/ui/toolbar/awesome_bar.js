@@ -233,6 +233,9 @@ frappe.search.AwesomeBar = class AwesomeBar {
 			var value = o.text.value;
 			var item = awesomplete.get_item(value);
 
+			// Read before the input is cleared below, which is where the query lives.
+			frappe.search.memory.record($input.val(), value);
+
 			if (item.route_options) {
 				frappe.route_options = item.route_options;
 			}
@@ -301,8 +304,9 @@ frappe.search.AwesomeBar = class AwesomeBar {
 	build_options(txt) {
 		const out = this.collect_options(txt);
 
-		// The rerank wants the array sorted by index.
+		// The rerank wants the array sorted by index; the pin outranks the rerank.
 		frappe.search.frecency.rerank(out);
+		frappe.search.memory.pin(out, txt, this.options);
 		out.forEach(add_history_marker);
 
 		return out.sort(function (a, b) {
@@ -376,6 +380,8 @@ frappe.search.AwesomeBar = class AwesomeBar {
 			callback: (r) => {
 				if (seq !== this._hook_search_seq || !r.message?.length) return;
 				this.options = this.deduplicate(this.options.concat(r.message));
+				// Hook results arrive after the pin was placed and may score above it.
+				frappe.search.memory.pin(this.options, txt);
 				this.options.sort((a, b) => b.index - a.index);
 				$(this.awesomplete.ul).toggleClass("p-0 m-0", cint(this.options?.length) == 0);
 				this.search_modal
@@ -542,11 +548,16 @@ frappe.search.AwesomeBar = class AwesomeBar {
 	}
 };
 
-/** Nothing is promoted silently: a clock marks a result moved up because you open it a lot. */
+/**
+ * Nothing is promoted silently. A pin means "you picked this for this exact query", a
+ * clock means "you open this a lot" — two different reasons deserve two glyphs.
+ */
 function add_history_marker(option) {
 	if (!option.boosted_by_history) return;
 
-	const reason = __("Ranked higher because you open this often");
+	const [icon_name, reason] = option.pinned_for_query
+		? ["pin", __("Ranked higher because you keep picking it for this search")]
+		: ["history", __("Ranked higher because you open this often")];
 
 	// --icon-stroke is what .icon paints with, so overriding it here is the only way to
 	// mute the glyph — a text colour class would not reach it.
@@ -554,7 +565,7 @@ function add_history_marker(option) {
 		option.label || option.value
 	}<span class="ml-2" style="--icon-stroke: var(--text-muted)" title="${frappe.utils.escape_html(
 		reason
-	)}">${frappe.utils.icon("history", "xs")}</span>`;
+	)}">${frappe.utils.icon(icon_name, "xs")}</span>`;
 }
 
 function first_route(route) {

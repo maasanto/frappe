@@ -18,6 +18,19 @@ const FUZZY_BASE_SCORE = 100;
 // 0.01 offsets get_doctypes uses as tie-breakers.
 const RANK_EPSILON = 1e-6;
 
+const MEMORY_KEY = "awesomebar_selections";
+// Digit-only queries ("2024") would otherwise become integer-like object keys, which
+// JavaScript enumerates in numeric order before insertion order — silently breaking the
+// LRU eviction in frappe.search.memory.record.
+const MEMORY_KEY_PREFIX = "q:";
+const MEMORY_MAX_QUERIES = 100;
+// Low enough that a single pick already pins, the way Raycast and Alfred learn. What
+// makes that safe is the decay: a one-off fades in about three idle days, while a habit
+// worth keeping lasts weeks.
+const MEMORY_MIN_CONFIDENCE = 0.65;
+// How long a remembered pick keeps half its weight once the query goes unused.
+const MEMORY_HALF_LIFE_DAYS = 14;
+
 // The key visit_key (route_history.py) folds every draft of a doctype into. It is a
 // scoring key, not a route: nothing navigates to it.
 const NEW_DOCUMENT_KEY_PREFIX = "New/";
@@ -867,6 +880,143 @@ frappe.search.frecency = {
 				option.boosted_by_history = rank < rank_before.get(option);
 				option.index = scores_to_share[rank] + (near_ties.length - rank) * RANK_EPSILON;
 			});
+	},
+};
+
+/**
+ * Remembers what you picked for a given query, so picking Sales Invoice once for "inv"
+ * pins it for "inv" next time. Conditioned on the query rather than on the result, so it
+ * only fires where the habit was actually formed.
+ *
+ * Device-local by design: no schema, no boot payload, and nothing to migrate.
+ */
+frappe.search.memory = {
+	normalize(query) {
+		return (query || "").trim().toLowerCase().replace(/\s\s+/g, " ");
+	},
+
+	// localStorage is shared across every Frappe user of a browser profile — on a shared
+	// terminal one user's habits must not shape another user's ranking.
+	storage_key() {
+		return `${MEMORY_KEY}:${frappe.session.user}`;
+	},
+
+	// Read once and kept in memory: recall runs on every keystroke, and re-parsing the
+	// whole store that often is work no keystroke should pay for.
+	cache: null,
+
+	load() {
+		if (this.cache) return this.cache;
+		try {
+			this.cache = JSON.parse(localStorage.getItem(this.storage_key())) || {};
+		} catch (e) {
+			// Corrupted storage: starting over only costs relearning a few picks.
+			this.cache = {};
+		}
+		return this.cache;
+	},
+
+	/**
+	 * Laplace-smoothed selection rate, with both counters faded by how long the query has
+	 * gone unused. One pick earns a pin and one contradicting pick corrects a fresh one —
+	 * it flips a single-pick pin outright and unpins a double-pick one — while a habit
+	 * repeated three or more times takes more than one stray pick to dislodge. A pin you
+	 * stop using expires without needing a contradiction at all.
+	 *
+	 * The fade applies to the totals rather than to each pick separately: keeping a
+	 * timestamp per pick would grow the payload to sharpen a tie-breaker.
+	 */
+	confidence(entry) {
+		const weight = this.fade(entry);
+		return (entry.hits * weight + 1) / ((entry.hits + entry.misses) * weight + 2);
+	},
+
+	fade(entry) {
+		const idle_days = entry.last_used
+			? (Date.now() - entry.last_used) / (24 * 60 * 60 * 1000)
+			: 0;
+		return 0.5 ** (idle_days / MEMORY_HALF_LIFE_DAYS);
+	},
+
+	record(query, value) {
+		const normalized_query = this.normalize(query);
+		if (normalized_query.length < 2) return;
+
+		const memory = this.load();
+		const stored_key = MEMORY_KEY_PREFIX + normalized_query;
+		const entry = memory[stored_key];
+		let updated;
+
+		// Faded before they are weighed and stored: the write below resets last_used, so
+		// raw counts would revive an expired pin at full strength on the very pick that
+		// contradicts it.
+		const weight = entry ? this.fade(entry) : 1;
+		const hits = entry ? entry.hits * weight : 0;
+		const misses = entry ? entry.misses * weight : 0;
+
+		if (!entry || (entry.value !== value && misses + 1 >= hits)) {
+			updated = { value: value, hits: 1, misses: 0 };
+		} else if (entry.value === value) {
+			updated = { value: value, hits: hits + 1, misses: misses };
+		} else {
+			updated = { value: entry.value, hits: hits, misses: misses + 1 };
+		}
+
+		// Reinserting moves the key to the end of the iteration order, so the eviction
+		// below drops the least recently used query rather than the oldest one.
+		delete memory[stored_key];
+		memory[stored_key] = { ...updated, last_used: Date.now() };
+
+		const queries = Object.keys(memory);
+		if (queries.length > MEMORY_MAX_QUERIES) delete memory[queries[0]];
+
+		try {
+			localStorage.setItem(this.storage_key(), JSON.stringify(memory));
+		} catch (e) {
+			// storage full or disabled: the boost is optional, dropping it is fine
+		}
+	},
+
+	recall(query) {
+		const normalized_query = this.normalize(query);
+		const memory = this.load();
+
+		// The pick was recorded when the query was usually shorter than what's typed by
+		// now, so the longest stored prefix of the current query wins. A prefix that is
+		// stored but not yet trusted is skipped rather than taken as an answer: typing one
+		// more letter must not drop a pin the shorter query still earns.
+		for (let length = normalized_query.length; length >= 2; length--) {
+			const entry = memory[MEMORY_KEY_PREFIX + normalized_query.slice(0, length)];
+			if (entry && this.confidence(entry) > MEMORY_MIN_CONFIDENCE) {
+				return entry.value;
+			}
+		}
+		return null;
+	},
+
+	/**
+	 * Scores the result this user keeps picking for this exact query above every other
+	 * match. Only touches what the search already matched, so a remembered choice never
+	 * reappears once it stops matching what is being typed. `rivals` are the results
+	 * already on the list that it must also outrank, like "Search for …".
+	 */
+	pin(options, query, rivals = []) {
+		const remembered = this.recall(query);
+		if (!remembered) return;
+
+		// Every copy, not just the first. deduplicate keeps one option per source for
+		// anything carrying a description, so a route reachable as both a doctype and a
+		// desk entry survives twice — pinning one would leave the pair split apart in the
+		// ranking, with only one carrying the history marker.
+		const pinned = options.filter((option) => option.value === remembered);
+		if (!pinned.length) return;
+
+		const top_index = Math.max(...options.concat(rivals).map((option) => option.index)) + 1;
+		pinned.forEach((option) => {
+			option.index = top_index;
+			option.boosted_by_history = true;
+			option.pinned_for_query = true;
+		});
 	},
 };
 
