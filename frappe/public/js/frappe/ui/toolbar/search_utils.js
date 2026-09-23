@@ -788,8 +788,7 @@ frappe.search.frecency = {
 		this.scores = {};
 		this.links().forEach((link) => {
 			const key = this.route_key(link.route);
-			// A boot cached before this change has no score.
-			this.scores[key] = (this.scores[key] || 0) + (link.score || 0);
+			this.scores[key] = (this.scores[key] || 0) + link.score;
 		});
 		return this.scores;
 	},

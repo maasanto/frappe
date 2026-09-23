@@ -1,11 +1,3 @@
-// Kept in step with search_utils.js, whose constants are not reachable from here.
-const FRECENCY_BAND = 0.7;
-const FUZZY_BASE_SCORE = 100;
-const band_cutoff = (top_score) =>
-	top_score > FUZZY_BASE_SCORE
-		? Math.max(top_score * FRECENCY_BAND, FUZZY_BASE_SCORE)
-		: top_score * FRECENCY_BAND;
-
 context("Awesome Bar", () => {
 	before(() => {
 		cy.visit("/login");
@@ -64,11 +56,9 @@ context("Awesome Bar", () => {
 			.then((frappe) => {
 				const awesome_bar = frappe.app.awesome_bar;
 				const options = awesome_bar.build_options("todo");
+				// On a bare site, every result for a short query is a near-tie.
 				const runner_up = options.find(
-					(option) =>
-						option.route &&
-						option.value !== options[0].value &&
-						option.index >= band_cutoff(options[0].index)
+					(option) => option.route && option.value !== options[0].value
 				);
 
 				const original_scores = frappe.search.frecency.scores;

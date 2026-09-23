@@ -128,7 +128,7 @@ def _is_permitted_link(route: str, views: "DeskViews") -> bool:
 	if len(parts) == 1:
 		return route in views.allowed_pages
 	# Query Report: "query-report/<name>"
-	if parts[0] == "query-report":
+	if len(parts) >= 2 and parts[0] == "query-report":
 		return parts[1] in views.allowed_reports
 	# Report Builder: "List/<doctype>/Report/<name>"
 	if len(parts) >= 4 and parts[0] == "List" and parts[2] == "Report":
