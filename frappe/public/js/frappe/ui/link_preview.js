@@ -45,11 +45,9 @@ frappe.ui.LinkPreview = class {
 		if (!(frappe.boot.link_preview_doctypes || []).includes(this.doctype)) {
 			return;
 		}
-		//If control field value is changed, new popover has to be created
-		this.element.on("change", () => {
-			this.new_popover = true;
-		});
-		if (!this.popover || this.new_popover) {
+		// a form reuses its link inputs across documents and sets their value without a
+		// change event, so rebuild whenever the element points at another document
+		if (this.popover?.previewed_name !== this.name) {
 			this.data_timeout = setTimeout(() => {
 				this.create_popover(e);
 			}, 100);
@@ -64,13 +62,14 @@ frappe.ui.LinkPreview = class {
 	}
 
 	create_popover(e) {
-		this.new_popover = false;
 		if (this.element.is(":focus")) {
 			return;
 		}
 
+		const previewed_name = this.name;
 		this.get_preview_data().then((preview_data) => {
-			if (preview_data) {
+			// ignore a late response once another link is hovered
+			if (preview_data && this.name === previewed_name) {
 				if (this.popover_timeout) {
 					clearTimeout(this.popover_timeout);
 				}
@@ -81,7 +80,9 @@ frappe.ui.LinkPreview = class {
 						this.popover.config.content = new_content;
 					} else {
 						this.init_preview_popover(preview_data);
+						this.popover = this.element.data("bs.popover");
 					}
+					this.popover.previewed_name = previewed_name;
 					this.show_popover(e);
 				}, 1000);
 			}
